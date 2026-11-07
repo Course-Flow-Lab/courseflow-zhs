@@ -6,7 +6,7 @@
 //! this draft; everything else is a typed `unsupported_operation`.
 
 use serde::{Deserialize, Serialize};
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 
 use crate::error::ModuleError;
 
@@ -84,7 +84,13 @@ pub fn fixture_courses() -> Result<Value, ModuleError> {
     Ok(json!({ "courses": courses }))
 }
 
-pub fn fixture_units(_course: &Course) -> Result<Value, ModuleError> {
+pub fn fixture_units(course: &Course) -> Result<Value, ModuleError> {
+    if course.kind != "shared" {
+        return Ok(json!({"units":[
+            {"id":"smart-video","name":"离线智慧课程视频","chapter_id":"smart-c1","chapter_name":"知识点一","lesson_id":"smart-k1","kind":"video","duration_seconds":120,"watched_seconds":0,"state":"not_started","video_id":"smart-v1","selectable":true},
+            {"id":"smart-doc","name":"离线智慧课程文档","chapter_id":"smart-c1","chapter_name":"知识点一","lesson_id":"smart-k1","kind":"document","duration_seconds":0,"watched_seconds":0,"state":"not_started","video_id":null,"selectable":true}
+        ]}));
+    }
     let raw = load_fixture(UNITS_FIXTURE, "fixtures/units.json")?;
     let chapters = raw
         .get("chapters")
@@ -168,7 +174,7 @@ fn smart_course(row: &Value) -> Result<Course, ModuleError> {
         progress: percent(&row["schedule"]),
         // The v1 fixture deliberately reports no outline for the smart course:
         // the AI knowledge-outline handshake (protocol module 6) is not ported yet.
-        outline_available: false,
+        outline_available: true,
     })
 }
 

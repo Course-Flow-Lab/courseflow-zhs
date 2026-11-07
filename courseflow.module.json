@@ -2,33 +2,105 @@
   "schemaVersion": 1,
   "id": "zhs",
   "name": "智慧树",
-  "version": "0.2.2",
+  "version": "0.3.0",
   "moduleApi": 1,
-  "engines": { "framework": ">=0.1.0-0 <0.2.0" },
+  "engines": {
+    "framework": ">=0.1.1 <0.2.0"
+  },
   "runtime": {
     "engine": "binary",
-    "entry": "target/release/courseflow-zhs"
+    "entry": "target/release/courseflow-zhs",
+    "files": [
+      "LICENSE"
+    ]
   },
   "platform": {
     "id": "zhs",
     "name": "智慧树",
     "short": "智慧树",
-    "login": ["qr"],
-    "operations": ["study", "answer", "review", "meeting", "mastery", "qa", "ask"],
-    "unit_kinds": ["video", "document"],
+    "login": [
+      "qr"
+    ],
+    "operations": [
+      "study",
+      "answer",
+      "review",
+      "meeting",
+      "mastery",
+      "qa",
+      "ask",
+      "trial"
+    ],
+    "unit_kinds": [
+      "video",
+      "document"
+    ],
     "max_speed": 1.5,
     "presentation": {
       "tabs": [
-        { "id": "qa", "label": "问答区", "when": { "course.kind": "shared" } }
+        {
+          "id": "study",
+          "label": "学习目录"
+        },
+        {
+          "id": "review",
+          "label": "每日复习",
+          "when": {
+            "course.kind": "shared"
+          }
+        },
+        {
+          "id": "answer",
+          "label": "作业与考试"
+        },
+        {
+          "id": "mastery",
+          "label": "掌握度"
+        },
+        {
+          "id": "meeting",
+          "label": "见面课",
+          "when": {
+            "course.kind": "shared"
+          }
+        },
+        {
+          "id": "qa",
+          "label": "问答区",
+          "when": {
+            "course.kind": "shared"
+          }
+        },
+        {
+          "id": "score",
+          "label": "成绩分析",
+          "when": {
+            "course.kind": "shared"
+          }
+        },
+        {
+          "id": "records",
+          "label": "执行记录"
+        }
       ],
       "actions": [
-        { "id": "trial", "label": "短时试跑", "when": { "course.family": "shared" } }
+        {
+          "id": "trial",
+          "label": "短时试跑",
+          "when": {
+            "course.kind": "shared"
+          }
+        }
       ]
-    }
+    },
+    "keepalive_seconds": 300
   },
   "permissions": {
-    "network": ["zhihuishu.com", "*.zhihuishu.com"],
-    "browser": false,
+    "network": [
+      "zhihuishu.com",
+      "*.zhihuishu.com"
+    ],
+    "browser": true,
     "ai": true,
     "storage": "module"
   }

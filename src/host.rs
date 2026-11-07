@@ -8,7 +8,7 @@ use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
-use serde_json::{json, Map, Value};
+use serde_json::{Map, Value, json};
 
 use crate::error::ModuleError;
 use crate::rpc::RpcClient;
@@ -103,6 +103,10 @@ pub struct FetchResponse {
 ///
 /// Tests implement this trait with an in-memory mock (no network, no account).
 pub trait Host: Send + Sync {
+    /// 扩展宿主服务；模拟宿主可以只实现本次测试使用的方法。
+    fn service(&self, method: &str, _params: Value) -> Result<Value, ModuleError> {
+        Err(ModuleError::unsupported(format!("宿主尚未提供 {method}")))
+    }
     fn fetch(&self, request: &FetchRequest) -> Result<FetchResponse, ModuleError>;
 
     fn state_get(&self, namespace: &str, key: &str, session: &str) -> Result<Value, ModuleError>;
@@ -142,6 +146,9 @@ impl CwHost {
 }
 
 impl Host for CwHost {
+    fn service(&self, method: &str, params: Value) -> Result<Value, ModuleError> {
+        self.client.call(method, params)
+    }
     fn fetch(&self, request: &FetchRequest) -> Result<FetchResponse, ModuleError> {
         let params = serde_json::to_value(request).map_err(|error| {
             ModuleError::protocol_changed(format!("无法序列化 cw.net.fetch 参数：{error}"))

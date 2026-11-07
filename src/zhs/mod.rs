@@ -1,22 +1,20 @@
-//! 智慧树 platform implementation behind the `PlatformApi` trait.
+//! 智慧树平台实现，通过 `PlatformApi` 接入 Courseflow 宿主。
 //!
-//! Two sources are supported, selected by `CF_MODULE_SETTINGS.source`:
-//!   * `fixture` (default) — no network at all, deterministic demo data;
-//!   * `live` — real calls through `cw.net.fetch`, as far as this draft has ported.
-//!
-//! The module never sees cookies, tokens or credentials: challenge and session
-//! handles are opaque strings passed back to the framework.
+//! `CF_MODULE_SETTINGS.source` 默认 `live`，访问真实平台；
+//! 显式设置 `fixture` 才使用离线样例。无效配置会阻止进程启动。
+//! 模块只接收不透明会话句柄，HTTP 凭据、模型密钥和浏览器由宿主管理。
 
 pub mod catalog;
+pub mod crypto;
 pub mod endpoints;
+pub mod features;
 pub mod live;
 pub mod session;
-pub mod crypto;
 pub mod study;
 
 pub use catalog::{Course, Unit, UnitState};
 
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 
 use crate::error::ModuleError;
 use crate::host::{FetchRequest, FetchResponse, Host};
@@ -53,9 +51,7 @@ impl Default for Settings {
 }
 
 impl Settings {
-    /// Parse `CF_MODULE_SETTINGS` (a JSON object, `{}` when unset). Malformed input or
-    /// an unknown `source` falls back to fixture and returns human-readable warnings
-    /// for stderr; it never takes the module down.
+    /// 解析模块设置；返回的警告代表无效配置，入口会输出中文说明并退出。
     pub fn from_env(raw: Option<&str>) -> (Self, Vec<String>) {
         let mut warnings = Vec::new();
         let Some(raw) = raw else {
@@ -65,13 +61,13 @@ impl Settings {
             Ok(parsed) => parsed,
             Err(error) => {
                 warnings.push(format!(
-                    "CF_MODULE_SETTINGS 不是合法 JSON（{error}），已回退 fixture"
+                    "CF_MODULE_SETTINGS 不是合法 JSON（{error}），请修正配置后重新启用模块"
                 ));
                 return (Self::default(), warnings);
             }
         };
         let Some(settings) = parsed.as_object() else {
-            warnings.push("CF_MODULE_SETTINGS 不是 JSON 对象，已回退 fixture".to_owned());
+            warnings.push("CF_MODULE_SETTINGS 不是 JSON 对象，请修正配置后重新启用模块".to_owned());
             return (Self::default(), warnings);
         };
         let source = match settings.get("source") {
@@ -79,7 +75,7 @@ impl Settings {
             Some(Value::String(source)) => source.clone(),
             Some(other) => {
                 warnings.push(format!(
-                    "CF_MODULE_SETTINGS.source 必须是字符串（收到 {other}），已回退 fixture"
+                    "CF_MODULE_SETTINGS.source 必须是字符串（收到 {other}），请修正配置后重新启用模块"
                 ));
                 "fixture".to_owned()
             }
@@ -89,7 +85,7 @@ impl Settings {
             "live" => Source::Live,
             other => {
                 warnings.push(format!(
-                    "未知的 CF_MODULE_SETTINGS.source = {other}，已回退 live"
+                    "未知的 CF_MODULE_SETTINGS.source = {other}，请修正配置后重新启用模块"
                 ));
                 Source::Live
             }
@@ -205,104 +201,162 @@ impl Zhs {
         course: &Course,
         unit: &Unit,
         checkpoint: Option<&Value>,
+        options: &Value,
     ) -> Result<Value, ModuleError> {
-        // A completed unit has nothing to open. The reference learning driver returns early for
-        // `target.completed`; asking the gateway to open it answers `421` (course finished).
-        if unit.state == catalog::UnitState::Completed {
-            return Ok(json!({
-                "status": "completed",
-                "evidence": {
-                    "already_completed": true,
-                    "watched_seconds": unit.watched_seconds,
-                },
-            }));
+        let review = options["operation"] == "review";
+        let trial = options["operation"] == "trial";
+        if unit.state == catalog::UnitState::Completed && !review {
+            return Ok(json!({"status":"completed","evidence":{"already_completed":true}}));
         }
-
-        let resumed = checkpoint.filter(|value| {
-            value.get("phase").and_then(Value::as_str) == Some("running")
-        });
+        let generation = options["execution_id"].as_str().unwrap_or("");
         let identity = host.identity(session)?;
-        let account_raw = identity
-            .get("account_raw")
-            .and_then(Value::as_str)
-            .unwrap_or_default()
-            .to_owned();
-
-        let mut prepared = match resumed {
-            Some(value) => live::Prepared::from_checkpoint(value)?,
-            None => {
-                let entry = self.entry_for(host, session, course)?;
-                let earlier = self.earlier_incomplete(host, session, course, unit)?;
-                live::prepare(
-                    host,
-                    &self.keys,
-                    session,
-                    &account_raw,
-                    course,
-                    &entry,
-                    unit,
-                    earlier,
-                )?
+        let account = identity["account_raw"].as_str().unwrap_or("");
+        let resumed = checkpoint.filter(|v| v["phase"] == "running");
+        let mut prepared = if let Some(cp) = resumed {
+            live::Prepared::from_checkpoint(cp)?
+        } else {
+            let entry = self.entry_for(host, session, course)?;
+            let earlier = if review {
+                false
+            } else {
+                self.earlier_incomplete(host, session, course, unit)?
+            };
+            let mut p = live::prepare(
+                host, &self.keys, session, account, course, &entry, unit, earlier,
+            )?;
+            if review {
+                p.position = 0;
+                p.questions.clear();
+                p.blocking_at = None;
+                p.duration = p
+                    .duration
+                    .min(options["review_seconds"].as_i64().unwrap_or(600).max(1));
             }
+            if trial {
+                p.duration = p.duration.min(
+                    p.position
+                        + options["limit_seconds"]
+                            .as_i64()
+                            .unwrap_or(90)
+                            .clamp(1, 180),
+                );
+            }
+            p
         };
-
         if prepared.position >= prepared.duration {
-            return Ok(json!({
-                "status": "completed",
-                "evidence": { "watched_seconds": prepared.position },
-                "checkpoint": prepared.to_checkpoint(),
-            }));
+            if review {
+                return Ok(
+                    json!({"status":"completed","checkpoint":prepared.to_checkpoint(),"evidence":{"reviewed_seconds":prepared.position,"original_state_preserved":true}}),
+                );
+            }
+            let entry = self.entry_for(host, session, course)?;
+            let units = live::outline(host, &self.keys, session, course, &entry)?;
+            let confirmed = units.iter().find(|u| u.id == unit.id).is_some_and(|u| {
+                if trial {
+                    u.watched_seconds.unwrap_or(0) >= prepared.position
+                } else {
+                    u.state == catalog::UnitState::Completed
+                }
+            });
+            if confirmed {
+                return Ok(
+                    json!({"status":"completed","evidence":{"platform_confirmed":true,"watched_seconds":prepared.position},"checkpoint":prepared.to_checkpoint()}),
+                );
+            }
+            let attempts = checkpoint
+                .and_then(|v| v["verify_attempts"].as_i64())
+                .unwrap_or(0)
+                + 1;
+            let mut cp = prepared.to_checkpoint();
+            cp["verify_attempts"] = json!(attempts);
+            return Ok(if attempts >= 6 {
+                json!({"status":"needs_human","reason":"保存已应答，但平台回读尚未确认，请在官方页面核对后继续","checkpoint":cp})
+            } else {
+                json!({"status":"in_progress","detail":"正在回读平台进度","wait_ms":1500,"checkpoint":cp,"progress":{"watched_seconds":prepared.position}})
+            });
         }
-
-        // Popup quizzes that are due at the current position are answered from the platform's own
-        // option marks, exactly like the reference learning driver does before a save.
         let due: Vec<Value> = prepared
             .due_questions()
             .into_iter()
             .map(|(_, ids)| ids.clone())
             .collect();
         for ids in due {
-            if !live::answer_popup(host, &self.keys, session, course, unit, &ids)? {
-                return Ok(json!({
-                    "status": "needs_human",
-                    "reason": "interaction_popup",
-                    "checkpoint": prepared.to_checkpoint(),
-                }));
+            let pending = live::popup_answers(
+                host,
+                &self.keys,
+                session,
+                course,
+                unit,
+                &ids,
+                &options["interaction_answers"],
+            )?;
+            if !pending.is_empty() {
+                return Ok(
+                    json!({"status":"needs_ai","questions":features::operations::public(&pending)?,"reason":"视频弹题需要作答","checkpoint":prepared.to_checkpoint()}),
+                );
             }
             prepared.questions.retain(|(_, keep)| keep != &ids);
         }
-
-        let boundary = prepared.boundary();
-        let chunk = (boundary - prepared.position).min(STUDY_CHUNK_SECONDS);
+        let chunk = (prepared.boundary() - prepared.position).min(STUDY_CHUNK_SECONDS);
         if chunk <= 0 {
-            // A theme/picture/knowledge-card overlay sits at this position; the reference stops.
-            return Ok(json!({
-                "status": "needs_human",
-                "reason": "interaction_overlay",
-                "checkpoint": prepared.to_checkpoint(),
-            }));
+            return Ok(
+                json!({"status":"needs_human","reason":"平台要求完成互动卡片，请在官方页面处理","checkpoint":prepared.to_checkpoint()}),
+            );
         }
-
-        live::save(host, &self.keys, session, &account_raw, course, &prepared, chunk)?;
+        let speed = if !review && options["speedup"] == true {
+            1.5
+        } else {
+            1.0
+        };
+        let seconds = ((chunk as f64) / speed).ceil() as i64;
+        let now = host.now()?;
+        let ready = resumed
+            .filter(|v| v["execution_id"].as_str().unwrap_or("") == generation)
+            .and_then(|v| v["save_after"].as_i64());
+        if ready.is_none() || now < ready.unwrap_or(i64::MAX) {
+            let after = ready.unwrap_or(now + seconds);
+            let mut cp = prepared.to_checkpoint();
+            cp["save_after"] = json!(after);
+            cp["execution_id"] = json!(generation);
+            return Ok(
+                json!({"status":"in_progress","checkpoint":cp,"progress":{"watched_seconds":prepared.position},"wait_ms":(after-now).max(1)*1000}),
+            );
+        }
+        live::save(host, &self.keys, session, account, course, &prepared, chunk)?;
         prepared.advance(chunk);
+        let next = (prepared.boundary() - prepared.position)
+            .min(STUDY_CHUNK_SECONDS)
+            .max(1);
+        let mut cp = prepared.to_checkpoint();
+        cp["execution_id"] = json!(generation);
+        cp["save_after"] = json!(now + ((next as f64) / speed).ceil() as i64);
+        Ok(
+            json!({"status":"in_progress","checkpoint":cp,"progress":{"watched_seconds":prepared.position},"wait_ms":if prepared.position>=prepared.duration {1000}else{((next as f64)/speed).ceil()as i64*1000}}),
+        )
+    }
 
-        if prepared.position >= prepared.duration {
-            return Ok(json!({
-                "status": "completed",
-                "evidence": { "watched_seconds": prepared.position },
-                "checkpoint": prepared.to_checkpoint(),
-            }));
-        }
-        Ok(json!({
-            "status": "in_progress",
-            "progress": { "watched_seconds": prepared.position },
-            "wait_ms": chunk * 1000,
-            "checkpoint": prepared.to_checkpoint(),
-        }))
+    fn smart_step(
+        &self,
+        host: &dyn Host,
+        session: &str,
+        course: &Course,
+        unit: &Unit,
+        checkpoint: Option<&Value>,
+        options: &Value,
+    ) -> Result<Value, ModuleError> {
+        features::operations::smart_step(self, host, session, course, unit, checkpoint, options)
     }
 }
 
 impl PlatformApi for Zhs {
+    fn extension(
+        &self,
+        host: &dyn Host,
+        method: &str,
+        params: &Value,
+    ) -> Result<Value, ModuleError> {
+        features::operations::dispatch(self, host, method, params)
+    }
     fn describe(&self) -> PlatformDescriptor {
         platform::manifest_platform()
     }
@@ -386,6 +440,9 @@ impl PlatformApi for Zhs {
         match self.settings.source {
             Source::Fixture => catalog::fixture_units(course),
             Source::Live => {
+                if course.kind != "shared" {
+                    return features::operations::smart_units(self, host, session, course);
+                }
                 let entry = self.entry_for(host, session, course)?;
                 let units = live::outline(host, &self.keys, session, course, &entry)?;
                 let snapshot = serde_json::to_value(&units)
@@ -403,11 +460,27 @@ impl PlatformApi for Zhs {
         course: &Course,
         unit: &Unit,
         checkpoint: Option<&Value>,
-        _options: &Value,
+        options: &Value,
     ) -> Result<Value, ModuleError> {
         match self.settings.source {
+            Source::Fixture if options["operation"] == "review" => {
+                let mut target = unit.clone();
+                target.duration_seconds = Some(
+                    unit.duration_seconds
+                        .unwrap_or(60)
+                        .min(options["review_seconds"].as_i64().unwrap_or(600)),
+                );
+                let mut result = study::fixture_step(&target, checkpoint)?;
+                if result["status"] == "completed" {
+                    result["evidence"]["reviewed_seconds"] = json!(target.duration_seconds);
+                }
+                Ok(result)
+            }
             Source::Fixture => study::fixture_step(unit, checkpoint),
-            Source::Live => self.live_step(host, session, course, unit, checkpoint),
+            Source::Live if course.kind != "shared" => {
+                self.smart_step(host, session, course, unit, checkpoint, options)
+            }
+            Source::Live => self.live_step(host, session, course, unit, checkpoint, options),
         }
     }
 }

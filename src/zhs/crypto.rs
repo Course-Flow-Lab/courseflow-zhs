@@ -13,12 +13,10 @@
 //! This is protocol cryptography, not credential handling: no user secret passes through here,
 //! and the AES key is scoped to one session's gateway calls.
 
-use aes::cipher::{block_padding::Pkcs7, BlockEncryptMut, KeyIvInit};
-use base64::engine::general_purpose::STANDARD;
+use aes::cipher::{BlockEncryptMut, KeyIvInit, block_padding::Pkcs7};
 use base64::Engine;
-use rsa::{
-    pkcs8::DecodePublicKey, traits::PublicKeyParts, BigUint, Pkcs1v15Encrypt, RsaPublicKey,
-};
+use base64::engine::general_purpose::STANDARD;
+use rsa::{BigUint, Pkcs1v15Encrypt, RsaPublicKey, pkcs8::DecodePublicKey, traits::PublicKeyParts};
 use serde_json::Value;
 
 use crate::error::ModuleError;
@@ -92,16 +90,16 @@ pub fn recover_protocol_key(key: &RsaPublicKey, signed: &str) -> Result<Vec<u8>,
 /// `secretStr`: JSON → AES-128-CBC(cKey, fixed IV, PKCS#7) → base64.
 pub fn encode_query(payload: &Value, key: &[u8]) -> Result<String, ModuleError> {
     let bytes = serde_json::to_vec(payload).map_err(|_| protocol_error())?;
-    let cipher =
-        cbc::Encryptor::<aes::Aes128>::new_from_slices(key, QUERY_IV).map_err(|_| protocol_error())?;
+    let cipher = cbc::Encryptor::<aes::Aes128>::new_from_slices(key, QUERY_IV)
+        .map_err(|_| protocol_error())?;
     Ok(STANDARD.encode(cipher.encrypt_padded_vec_mut::<Pkcs7>(&bytes)))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use rsa::traits::PrivateKeyParts;
     use rsa::RsaPrivateKey;
+    use rsa::traits::PrivateKeyParts;
 
     /// Independent vector: `printf '{"pageNo":1,"pageSize":20,"status":0}' | openssl enc -aes-128-cbc -K … -iv …`
     #[test]
@@ -129,10 +127,7 @@ mod tests {
 
         let body = br#"{"cKey":"0123456789abcdef"}"#;
         let mut block = vec![0x00, 0x01];
-        block.extend(std::iter::repeat_n(
-            0xFF,
-            public.size() - body.len() - 3,
-        ));
+        block.extend(std::iter::repeat_n(0xFF, public.size() - body.len() - 3));
         block.push(0x00);
         block.extend_from_slice(body);
         assert_eq!(block.len(), public.size());

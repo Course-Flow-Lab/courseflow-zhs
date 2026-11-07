@@ -2,7 +2,7 @@
 //! (module API v1 §6). Codes are strings, never integers.
 
 use serde::Serialize;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 
 pub const UNSUPPORTED_OPERATION: &str = "unsupported_operation";
 pub const INVALID_PARAMS: &str = "invalid_params";
@@ -30,6 +30,18 @@ const ALL_CODES: &[&str] = &[
     "module_version_changed",
     "net_blocked",
     "quiet_hours",
+    "browser_unavailable",
+    "browser_timeout",
+    "browser_closed",
+    "browser_page_error",
+    "browser_limit",
+    "task_cancelled",
+    "model_required",
+    "model_unavailable",
+    "model_not_ready",
+    "ai_unavailable",
+    "answer_format",
+    "no_questions",
 ];
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]

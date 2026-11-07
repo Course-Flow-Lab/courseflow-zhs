@@ -1,352 +1,119 @@
-# courseflow-zhs
+# Courseflow 智慧树模块
 
-智慧树 (Zhihuishu) platform module for [Courseflow](../courseflow-framework). It is a
-long-lived child process that speaks newline-delimited JSON-RPC 2.0 on stdin/stdout and
-implements **module API v1** (`moduleApi: 1`).
+`courseflow-zhs` 是智慧树平台的独立 Rust 模块，通过 stdin／stdout 的 NDJSON JSON-RPC 接入 [Courseflow 框架](../courseflow-framework)。模块 API 为 1，当前模块版本为 0.3.0，需要框架 `>=0.1.1 <0.2.0`。
 
-The framework owns HTTP, sessions, storage and time. This process never opens a socket,
-never reads a cookie, token or password, and never touches the data directory. Everything
-that reaches the outside world goes through `cw.net.fetch`, `cw.state`, `cw.clock.now` and
-`cw.log`.
+平台协议和官方页面脚本在本仓库；HTTP 凭据、Cookie 容器、持久化加密、模型密钥、浏览器进程和任务调度由框架管理。Studia 只供开发时对照，不在运行时导入或启动。
 
-| | |
+## 功能
+
+| 类别 | 已实现的行为 |
 | --- | --- |
-| Platform id | `zhs` |
-| Platform name | 智慧树 |
-| Login | `qr` |
-| Operations | `study`, `answer`, `review`, `meeting`, `mastery`, `qa`, `ask` |
-| Unit kinds | `video`, `document` |
-| Max speed | `1.5` |
-| Manifest | [`courseflow.module.json`](courseflow.module.json) |
-| Binary | `target/release/courseflow-zhs` |
-| Dependencies | `serde`, `serde_json`, `rsa`, `aes`, `cbc`, `base64`, `rand` (protocol crypto only; no HTTP stack) |
+| 扫码登录 | 真实二维码、状态轮询、Passport SSO、异常登录检查、身份验证、登录中心保活 |
+| 共享课目录 | 分页课程、章节和小节、视频时长、已学进度、先修检查和日限额提示 |
+| 共享课学习 | 默认原速、可选最高 1.5 倍速，先等待再保存；断点恢复、弹题、互动卡片暂停、平台完成回读 |
+| 智慧课程 | 知识点及资源、视频计时和文档完成记录、平台回读 |
+| 短时试跑 | 单个共享课视频、30–180 秒预算、保存后回读进度 |
+| 每日复习 | 已完成共享课视频、按日期轮换、分钟预算、原速、保留原完成状态 |
+| 作业与考试 | 共享课和智慧课程目录、开放状态与次数、题干和图片、已有答案保留、草稿、明确交卷、原作答回读 |
+| 重做与只读查看 | 平台允许时显式重做；已提交作业和智慧课程试卷走只读路径，不为查看重新开卷 |
+| 掌握度 | 知识图谱叶节点和随机节点、免考与满分跳过、无题跳过、最多三轮、成绩和正确答案回查 |
+| 见面课 | 分页列表、官方回放、加载分钟观看历史后续播、原速播放、平台签到回读、三分钟无进展暂停 |
+| 课程问答 | 官方页面动态签名、列表与筛选、模型或人工回答、每日限额、重复发布保护、已发布编号记录 |
+| 课程提问 | 可编辑草稿、选择后发布、同课程成员显式开启的互助优先 |
+| 成绩分析 | 计分规则、成绩、学习习惯分、课程互动分和问答统计 |
+| 框架集成 | 人工补答、题图认证代理、个人／共享模型、答案记忆、Markdown／Word／JSON／CSV 导出 |
 
-## Status of this draft
+以上为实现范围，并不代表已在本次会话用真实账号逐项验收。测试使用模拟宿主和显式 fixture，不会向真实平台保存学习进度、交卷、签到或发布内容。
 
-**Live mode is the default.** A real 智慧树 account can scan a real QR, list its courses, open a
-shared-course outline and study videos. Fixture mode remains for tests and demos without an
-account (`CF_MODULE_SETTINGS={"source":"fixture"}`).
+当前平台题型适配单选（含类型 14）、多选和填空；宿主支持通用人工补答表单，但未知平台题型仍提示在官方页面完成。共享课已提交考试没有已确认的只读接口，使用原任务的本地报告导出，不重新开考。
 
-Implemented against the real platform:
+## 构建与安装
 
-- `platform.describe` (descriptor asserted equal to the manifest by the contract tests)
-- `auth.begin` — GET `passport/login` (cookie seed) then the real QR image + `qrToken`
-- `auth.poll` — real status mapping (`-1` waiting, `0` scanned, `1` connected, `2` expired,
-  `3` cancelled)
-- `auth.complete` — the Passport SSO exchange: `abnormalLogin` anti-risk check →
-  `passport/login?pwd&service` (one-time, never retried) → `getLoginUserInfo`
-- `auth.verify` — `getLoginUserInfo`, also the session-restore check
-- `catalog.courses` — signed `queryShareCourseInfo` with pagination, plus the
-  `queryStudentAICourseList` 智慧课程 list
-- `catalog.units` — signed `learning/videolist`, the `login/gologin` bridge when the learning
-  session is missing, and `queryStuyInfo` progress merged per video
-- `study.step` — a unit the platform already reports as `completed` returns `completed` without
-  any gateway call (opening a finished video is what answers `421`); otherwise
-  `learning/queryCourse` policy gate, chapter gate, time-limit check,
-  `popupAnswer/loadVideoPointerInfo` interaction points, `prelearningNote` open, then
-  `saveDatabaseIntervalTimeV2` in 30-second chunks with the client's watch-point recipe.
-  Video popups are answered from the platform's own option marks before the next save.
+需要 Rust ≥ 1.88，使用 stable 工具链：
 
-Protocol crypto lives in `src/zhs/crypto.rs`: the RSA bootstrap key exchange that yields a
-per-session AES-128 key, and the AES-128-CBC `secretStr` request signing. Both are covered by
-known-answer tests (an OpenSSL-derived AES vector and a synthetic RSA-signed block).
-
-Still `unsupported_operation`, with a message naming what is missing:
-
-- popup questions are answered **only** when the platform marks the correct option
-  (`questionOptions[].result == 1`); an unmarked question returns `needs_human`
-  (`interaction_popup`) instead of guessing, and a theme/picture/knowledge-card overlay returns
-  `needs_human` (`interaction_overlay`), as the reference does
-- 智慧课程 (smart) outlines and study, papers/exams, mastery, meetings, and the Q&A board
-  (the reference drives a real browser for Q&A; module API v1 has no browser service and the
-  manifest declares `browser: false`)
-
-The port checklist below records each of these against the reference implementation.
-
-## Build, test, install
-
-Requires a Rust toolchain with edition 2021 support (verified on Rust 1.100). No network
-is needed to run tests or the fixture mode.
-
-```bash
-cargo build --release
-cargo test
-cargo test --release
+```sh
+cargo +stable test --locked
+cargo +stable build --release --locked
 ```
 
-The release binary is `target/release/courseflow-zhs`; that exact relative path is
-what the manifest's `runtime.entry` expects (the framework sets the working directory to
-the module directory).
+清单入口为 `target/release/courseflow-zhs`。框架目录中安装：
 
-Install it into a `courseflow-framework` checkout:
-
-```bash
-cd ../courseflow-framework
-npm run cli -- module add ../courseflow-zhs     # live by default
-npm run cli -- module list
-npm run cli -- module config zhs '{"source":"fixture"}'   # only for offline tests
+```sh
+npm run cli -- module add ../courseflow-zhs
+npm run cli -- module config zhs '{"source":"live"}'
 ```
 
-The CLI validates the manifest, checks `moduleApi`/`engines.framework`, pins the declared
-files (`courseflow.module.json` + `runtime.entry`; there are no `runtime.files`) by sha256
-in `modules.lock.json`, and spawns the binary with the environment below. A directory
-install copies only those declared files, not `target/`; the fixtures are embedded in the
-binary, so nothing else is needed at runtime.
+服务与 CLI 的 `CF_DATA_DIR` 必须相同。源码、测试数据和平台私有资料不放在同一目录。
 
-## Configuration: `CF_MODULE_SETTINGS`
-
-The framework spawns the module with only `PATH`, `TZ=UTC`, `CF_MODULE_ID` and
-`CF_MODULE_SETTINGS` (a JSON object from `modules.lock.json`, `{}` when unset).
-`CF_MODULE_ID` is ignored by this module. The only setting is:
-
-| Key | Values | Default | Meaning |
-| --- | --- | --- | --- |
-| `source` | `"fixture"` or `"live"` | `"live"` | Where platform data comes from; `fixture` is for tests and demos without an account |
-
-- `fixture` performs **no network at all**. `catalog.*` and `study.step` are deterministic
-  recorded data; login uses an embedded QR image; the only host calls are
-  `cw.clock.now` (for QR expiry) and none for the other fixture methods.
-- `live` attempts the real 智慧树 endpoints through `cw.net.fetch`. Only the subset
-  listed above answers; everything else is a typed `unsupported_operation`.
-
-Malformed JSON, a non-object, or an unknown `source` falls back to `fixture` with a
-warning on **stderr**; the module never refuses to start because of settings.
-
-## Run it by hand
-
-stdout is protocol-only (one JSON object per line). Human-readable logs go to stderr.
-On stdin EOF the process drains in-flight handlers for at most 5 s, flushes stdout and
-exits `0`.
-
-Describe (exactly one protocol line and nothing else on stdout):
-
-```bash
-printf '%s\n' '{"jsonrpc":"2.0","id":1,"method":"platform.describe","params":{"module_api":1,"framework_version":"0.1.0"}}' \
-  | CF_MODULE_SETTINGS='{"source":"fixture"}' ./target/release/courseflow-zhs
-```
-
-Courses:
-
-```bash
-printf '%s\n' '{"jsonrpc":"2.0","id":2,"method":"catalog.courses","params":{"session":"s_test"}}' \
-  | CF_MODULE_SETTINGS='{"source":"fixture"}' ./target/release/courseflow-zhs
-```
-
-A `study.step` sequence for unit `9001` (480 s); each invocation starts from the previous
-checkpoint, 60 s per step:
-
-```bash
-COURSE='{"id":"1000123456","recruit_id":"2000987654","name":"大学生心理健康教育","kind":"shared","kind_label":"共享课","family":"shared","progress":37.5,"outline_available":true}'
-UNIT='{"id":"9001","name":"1.1 什么是心理健康","chapter_id":"5001","chapter_name":"第一章 心理健康概述","lesson_id":"6001","kind":"video","duration_seconds":480,"watched_seconds":312,"state":"in_progress","video_id":"v1001","selectable":true}'
-for CP in 'null' '{"seconds":60}' '{"seconds":120}' '{"seconds":180}' '{"seconds":240}' '{"seconds":300}' '{"seconds":360}' '{"seconds":420}'; do
-  printf '{"jsonrpc":"2.0","id":1,"method":"study.step","params":{"session":"s_test","course":%s,"unit":%s,"checkpoint":%s,"options":{}}}\n' "$COURSE" "$UNIT" "$CP" \
-    | CF_MODULE_SETTINGS='{"source":"fixture"}' ./target/release/courseflow-zhs
-done
-```
-
-Result: seven `in_progress` steps (`watched_seconds` 60…420) and a final `completed` with
-`evidence.watched_seconds = 480`.
-
-## Methods
-
-| Method | fixture | live | Notes |
-| --- | --- | --- | --- |
-| `platform.describe` | ✅ | ✅ | No `source` involved; matches the manifest exactly |
-| `auth.begin` | ✅ | ✅ | Returns `{challenge:{id, kind:"qr", image, expires_at}}`; challenge id is the opaque framework session handle |
-| `auth.poll` | ✅ | ✅ | fixture: 1st poll `waiting`, 2nd+ `connected`, `expired` after `expires_at`. live: maps platform status -1/0/1/2/3 → waiting/scanned/connected/expired/failed |
-| `auth.complete` | ✅ | ✅ | fixture returns `演示学生` / `cf-demo-10001`; live runs `abnormalLogin` → `passport/login` → `getLoginUserInfo` and returns `{display_name, account_raw: uuid}` |
-| `auth.verify` | ✅ | ✅ | fixture returns `演示学生`; live calls `getLoginUserInfo` |
-| `catalog.courses` | ✅ | ✅ | live signs `queryShareCourseInfo` per page and merges `queryStudentAICourseList`; per-course `secret` entries go to module storage |
-| `catalog.units` | ✅ | ✅ | live: signed `learning/videolist` (+ `login/gologin` bridge when needed) merged with `queryStuyInfo` progress |
-| `study.step` | ✅ | ✅ | live: `queryCourse` gate, popup pointers, `prelearningNote`, then 30 s `saveDatabaseIntervalTimeV2` chunks; stops at an interaction point with `needs_human` |
-| anything else | ❌ | ❌ | `unsupported_operation` naming the method |
-
-Example error response (still one JSON line):
-
-```json
-{"jsonrpc":"2.0","id":4,"error":{"code":"unsupported_operation","message":"方法 answer.paper 尚未在本模块 v1 草案中实现；已实现：platform.describe、auth.begin/poll/complete/verify、catalog.courses/units、study.step"}}
-```
-
-## Fixture data and semantics
-
-Both fixture files are embedded at compile time with `include_str!`, so the binary does
-not depend on the working directory or on files shipped next to it.
-
-### `fixtures/courses.json`
-
-A recorded snapshot that keeps both platform responses separate:
-
-- `shared.result.courseOpenDtos` — raw `queryShareCourseInfo` shape. Maps
-  `courseId`/`recruitId`/`courseName`/`studyPercent`/`secret` to a `Course` with
-  `kind: "shared"`, `kind_label: "共享课"`, `family: "shared"` and
-  `outline_available = secret present`.
-- `smart.rt` — raw `queryStudentAICourseList` shape. Maps
-  `courseId`/`classId`/`courseName`/`schedule` to a `Course` with `kind: "smart"`,
-  `kind_label: "AI课"`, no `family`, and `outline_available: false` (this draft does not
-  model the AI knowledge outline).
-
-The two courses are:
-
-| id | kind | progress | outline_available |
-| --- | --- | --- | --- |
-| `1000123456` / recruit `2000987654` | `shared` | 37.5 | true |
-| `3000112233` / recruit `4000445566` | `smart` | 12.0 | false |
-
-### `fixtures/units.json`
-
-A normalized recording of `learning/videolist` + `learning/queryStuyInfo`: two chapters,
-two video units (`9001`, `9002`) and one document (`9003`). Mapping rules:
-
-- `chapter_id`/`chapter_name` and `lesson_id` come from the enclosing chapter/lesson.
-- `state` is one of `not_started`, `in_progress`, `completed`, `unknown`.
-- `selectable = duration_seconds > 0`; the framework never infers this itself.
-- The document has `duration_seconds: 0`, so it is the only unit with
-  `selectable: false` and it carries a `selectable_note`.
-
-### `study.step` checkpoint
-
-`checkpoint` is opaque to the framework and stored per job. This draft defines it as
-`{"seconds": n}`:
-
-1. read `checkpoint.seconds`, defaulting to `0` when the checkpoint is `null`/missing;
-2. add 60, capped at `unit.duration_seconds` (missing/negative durations are treated as
-   0);
-3. while below the duration, return
-   `{"status":"in_progress","progress":{"watched_seconds":n},"wait_ms":1000,"checkpoint":{"seconds":n}}`;
-4. on reaching the duration, return
-   `{"status":"completed","evidence":{"watched_seconds":n}}`.
-
-The function is pure, so replaying the same checkpoint returns the same next state — safe
-after a framework restart. A zero-duration unit (e.g. the fixture document) completes on
-the first step with `watched_seconds: 0`.
-
-### `auth.*` in fixture mode
-
-- The challenge id **is** the opaque `session` handle the framework passed to
-  `auth.begin`; the module neither parses nor validates the prefix.
-- `image` is an inline `data:image/png;base64,…` 116×116 demo QR (not a scannable code).
-- `expires_at = cw.clock.now + 120`.
-- Poll transition: first poll `waiting`, every poll after that `connected`; once
-  `now >= expires_at`, `expired` wins even for an already-connected challenge.
-- `auth.complete` returns `{"display_name":"演示学生","account_raw":"cf-demo-10001"}`;
-  `auth.verify` returns `{"display_name":"演示学生"}`. The framework digests
-  `account_raw`; it is stable and is not an email/cookie/token.
-- Challenges live only in this process. After a module restart the framework must call
-  `auth.begin` again; unknown fixture challenges are re-created lazily to keep the demo
-  alive, while unknown live challenges return `platform_login_expired`.
-
-## Protocol invariants
-
-- **Reader thread** owns stdin. Requests are dispatched onto their **own thread**, so a
-  handler may block on a host response without deadlocking the reader.
-- Host responses complete a `SyncSender` held in a `Mutex<HashMap<u64, …>>`.
-- stdout writes go through one `Mutex<BufWriter<Stdout>>`; each JSON line is written in
-  full and flushed immediately.
-- **Ids:** framework ids are echoed unchanged. Module-generated `cw.*` ids are
-  monotonically increasing from 1, never reused; the directions are independent, so
-  request id `1` from the framework and host-call id `1` do not collide.
-- **Time budget:** a handler gets 28 s. Each host call waits at most the smaller of 25 s
-  and the remaining budget; on timeout the handler returns `platform_unavailable` in time
-  for the framework's 30 s limit.
-- **Errors:** `cw.net.fetch` (and other host) error codes are mapped straight through.
-  All module API v1 codes are interned and kept verbatim; an unknown code degrades to
-  `platform_unavailable` with the original code in the message.
-- **Shutdown:** stdin EOF stops the reader; in-flight handlers get up to 5 s to write
-  their responses, then stdout is flushed and the process exits `0`.
-- No `cw.log` notification is emitted in this draft, so a single request produces exactly
-  one stdout line. Human logging always goes to stderr.
-- Responses may complete **out of order** because each request has its own thread; the
-  framework correlates by `id`, as JSON-RPC requires.
-
-## Errors emitted
-
-| Code | When |
-| --- | --- |
-| `unsupported_operation` | method or live capability not implemented |
-| `invalid_params` | missing/blank `session`, bad `course`/`unit`/`checkpoint`/`options`, wrong `module_api` |
-| `platform_login_expired` | QR challenge gone, live session rejected (401/403/5008 from platforms) |
-| `platform_verification_required` | live `cw.net.fetch`/platform asks for a challenge |
-| `platform_protocol_changed` | response shape/JSON/fixture shape not understood |
-| `platform_unavailable` | host call timeout, non-2xx HTTP, write failure |
-| `platform_rejected` | live refusals: closed course, chapter gate, study time limit, missing outline entry |
-| `not_found` | reserved (not emitted yet) |
-
-## Port checklist
-
-Reference implementation: `../courseweave`. Paths and function names below were read from
-that checkout; line numbers are as of this draft. Status is about **live** behavior unless
-stated otherwise.
-
-| 智慧树 function | Reference to read | Draft status |
+| 设置 | 默认值 | 含义 |
 | --- | --- | --- |
-| QR image begin | `../courseweave/src/zhs.rs:164-202` (`qr_code`: GET `passport/login` then `qrCodeLogin/getLoginQrImg`, PNG magic check, `qrToken`) | ✅ live `auth.begin` (real PNG + `qrToken`) and fixture |
-| QR state polling | `../courseweave/src/zhs.rs:204-218` (`poll`), `:594-603` (`login_state`, statuses -1/0/1/2/3) | ✅ live `auth.poll` and fixture |
-| SSO login completion | `../courseweave/src/zhs.rs:220-305` (`finish_login`: `oncePassword`, `user/abnormalLogin`, `passport/login?pwd&service`, then verify) | ✅ live `auth.complete`: `abnormalLogin` → `passport/login` → `getLoginUserInfo`; one-time exchange never retried |
-| Session verification | `../courseweave/src/zhs.rs:307-341` (`verify`: GET `gateway/f/v1/login/getLoginUserInfo?time=…`) | ✅ live `auth.verify` and fixture |
-| Account identity | `../courseweave/src/zhs/study.rs:106-127` (`platform_uuid`/`account_key`, reads `CASLOGC` cookie) | ⚠️ deliberately not ported: a module must not read cookies. The framework returns the identity it stored at `auth.complete` through `cw.session.identity` (`account_raw` = QR `uuid`) |
-| Shared course list | `../courseweave/src/zhs.rs:343-382` (`shared_courses`: `protocol_key(13)`, AES `secretStr` form, `status/pageNo/pageSize` pagination), `:546-592` (`parse_courses`) | ✅ live signed `queryShareCourseInfo` with pagination, and fixture |
-| AI / smart course list | `../courseweave/src/zhs/features.rs:85-134` (`feature_courses` adds `student/queryStudentAICourseList` with `status:3`, module 13) | ✅ live `queryStudentAICourseList` merged into the course list; the smart *outline* is still unported |
-| Protocol-key handshake | `../courseweave/src/zhs.rs:384-411` (`protocol_key`), `:498-537` (`bootstrap_public_key`, `recover_protocol_key`), `:539-544` (`encode_query`, AES-128-CBC) | ✅ live in `src/zhs/crypto.rs` (RSA PKCS#1 v1.5 bootstrap + AES-128-CBC `secretStr`), covered by known-answer tests |
-| Shared outline + progress | `../courseweave/src/zhs/outline.rs:64-153` (`shared_outline`, `learning_post`; module 11 `learning/videolist`, optional `learning/login/gologin` bridge), `:175-297` (`parse_outline`, `parse_video`, `apply_progress`; `queryStuyInfo`, small-lesson handling) | ✅ live `catalog.units`: `videolist`, `login/gologin` bridge, `queryStuyInfo` merge, and fixture |
-| Smart knowledge outline | `../courseweave/src/zhs/features.rs:146-253` (`feature_units`: module 6 `knowledge-study/course-basic`, `resources/list-knowledge-resource`, `resources-lab/get-video-time`) | ❌ live returns `unsupported_operation`; the fixture carries one smart course |
-| Study writes | `../courseweave/src/zhs/study.rs:129-222` (`prepare_study`: `learning/queryCourse`, chapter lock, `popupAnswer/loadVideoPointerInfo`, `learning/prelearningNote`), `:224-260` (`save_study`: `saveDatabaseIntervalTimeV2`, obfuscated `sdsew`/`zwsds`/`ewssw`), `:262-320` (`study_post`, `study_limits`); `../courseweave/src/zhs/features.rs:254-340` (`smart_study_write`, `feature_write`) | ✅ live `study.step`: `queryCourse`, chapter gate, time limit, popup pointers, `prelearningNote`, `saveDatabaseIntervalTimeV2` chunks |
-| Popups / interaction | `../courseweave/src/zhs/features/popup.rs:3,12` (`shared_pointers`, `shared_popup`) | ✅ question points are answered from the platform's marked option when one exists; unmarked questions and non-question overlays return `needs_human` (no model call, unlike the reference) |
-| Papers / exams | `../courseweave/src/zhs/features/assessment.rs:3-232` (`feature_exam_sso`, `feature_papers`, `feature_open`), `:509` (`feature_submitted`); gateways `newexam-api`, `studentexam-api`, `taurusexam-api`, smart `kg-ai-run` task list; modules 3/5/6 | ❌ not ported; `catalog.papers` / `exam.*` return `unsupported_operation` |
-| Mastery | `../courseweave/src/zhs/features/mastery.rs:3-188` (`mastery_papers`, `mastery_open`, `mastery_writes`, `mastery_submitted`, `graded_answers`; `queryCourseMapInfo`, `queryMasteryNodeInfo`, `getAllMasteryInfos`) | ❌ not ported |
-| Meetings / live classes | `../courseweave/src/zhs/features/activity.rs:3,36` (`meeting_list`, `meeting_status`; `stuonline.zhihuishu.com`, `im.zhihuishu.com`) | ❌ not ported |
-| Q&A board | `../courseweave/src/jobs/activity/qa.rs:8-100` (`Page::open`, `request`, `questions`), `:301` (`board`), `:323` (`drafts`); `QA_GATEWAY` = `creditqa-api.zhihuishu.com` | ❌ not ported. The reference drives a real browser to `qah5.zhihuishu.com`; module API v1 has no browser service and the manifest declares `browser: false` — a framework-side decision is needed |
-| Answer orchestration | `../courseweave/src/jobs/answer.rs:674,704,756,774` (`get_answers`, `save_answers`, `confirm_submit`, `reconcile`), `../courseweave/src/jobs/learning.rs` (`run`) | ❌ not ported; this is framework job logic rather than a platform wire protocol |
-| Presentation tabs/actions | manifest `presentation`, `when` predicates | ✅ in manifest and `platform.describe`; evaluation is the framework's job |
+| `CF_MODULE_SETTINGS` | `{}` | 宿主传入的模块配置 JSON |
+| `source` | `live` | 真实平台；只有显式 `fixture` 才使用离线样例 |
 
-Everything above shares one missing primitive: the signed request wrapper
-`../courseweave/src/zhs/features.rs:20-84` (`feature_request`) plus `encode_query`/
-`protocol_key`. Porting that first unlocks course list, outline, exams, mastery and study
-writes.
+无效 JSON、非对象或未知 source 会输出中文错误并退出，不静默切换到演示模式。`CF_MODULE_SETTINGS` 应由框架的模块设置提供。
 
-## Framework-side notes
+离线验证使用独立数据目录，再显式设置：
 
-1. **Environment:** exactly `CF_MODULE_SETTINGS` (JSON object) is read; `CF_MODULE_ID` is
-   ignored; no other environment variable matters. Working directory must be the module
-   directory because the manifest entry is relative.
-2. **IDs:** framework request ids are echoed exactly (any JSON value is accepted, though
-   the spec uses positive integers). Module `cw.*` call ids are monotonic from 1 and are
-   never reused.
-3. **Time:** fixture `auth.begin`/`auth.poll` call `cw.clock.now`; any harness must answer
-   those even in fixture mode. The whole handler is budgeted at 28 s and each host call at
-   ≤25 s.
-4. **Sessions:** the module stores nothing about cookies. `auth.begin` gets a `ch_…`
-   handle and `auth.poll`/`auth.complete` pass it back untouched. Live QR state
-   (`qrToken`, expiry) is process memory, so a restart mid-login means `auth.begin`
-   again.
-5. **Identity:** `account_raw` is `cf-demo-10001` in fixture mode; in live mode it would
-   come from the SSO exchange once ported. The framework should hash it as
-   `zhs/account/<sha256>`.
-6. **Output:** stdout is protocol-only and responses may be out of request order (threads).
-   Correlate by `id`. stderr is all human logs. No `cw.log` notifications are emitted.
-7. **Shutdown:** stdin EOF ⇒ drain ≤5 s ⇒ flush ⇒ exit 0. SIGTERM/SIGKILL handling stays
-   with the framework.
-8. **Live blockers:** (a) the module may only depend on `serde`/`serde_json`, so RSA/AES
-   signing cannot be implemented without a dependency decision; (b) the Q&A reference
-   needs a browser, which the current API exposes only as `permissions.browser: false`
-   and no `cw.browser` service; (c) live smart-course data needs the module-6 gateway.
-9. **Fixture safety:** fixtures are compiled in; installing/copying just the directory
-   (manifest + binary) is enough. `source` defaults to fixture, so an unconfigured install
-   never touches the network.
+```sh
+npm run cli -- module config zhs '{"source":"fixture"}'
+```
 
-## Tests
+fixture 的二维码和成绩为样例。真实账号部署必须明确使用 `live`。
 
-`cargo test` runs 21 tests (11 unit + 10 contract), with no network and no account:
+## 宿主方法
 
-- descriptor equals `courseflow.module.json` (`platform`, module id/name/version/api,
-  `when` keys, snake_case, no `native`)
-- course fixture: 2 courses, shared/smart fields, progress, `outline_available`
-- unit fixture: 3 units, 2 chapters, `selectable` false only for the document, note present
-- `study.step`: monotonic 60 s steps, completion at duration, zero-duration first-step
-  completion, replaying a checkpoint is idempotent, bad checkpoints rejected
-- unknown method → `unsupported_operation`; missing session → `invalid_params`
-- fixture auth flow: waiting → connected → expired, complete/verify identity
-- live unported methods: typed errors, no fetch performed
-- live `cw.net.fetch` errors pass through unchanged
-- live course POST shape (`fromurl`, Origin, JSON encoding) and parse
-- real NDJSON round trip through `rpc::serve` with the actual reader/dispatch (order
-  insensitive, notification produces no stdout line)
+基础接口包括 `platform.describe`、`auth.begin/poll/complete/verify`、`catalog.courses/units` 和 `study.step`。功能扩展包括：
+
+- `auth.keepalive`：只读刷新 Passport 登录页。
+- `catalog.papers/mastery/meetings/score`：试卷、掌握度、见面课和成绩。
+- `exam.open/review/redo/write/heartbeat/readback`：分段开卷、只读查看、显式重做、草稿、计时与结果回读。
+- `qa.board/posts`：课程问题和当前账号发布记录。
+- `activity.step`：见面课、回答和提问的分步执行。
+
+所有外部访问通过 `cw.net.fetch`、`cw.state`、`cw.session.identity`、`cw.browser.*`、`cw.peers.*`、`cw.clock.now` 和 `cw.log`。模型生成由宿主编排，模块不接收模型密钥。完整 DTO 和调用约定见框架的[中文模块协议](../courseflow-framework/spec/module-api-v1.md)。
+
+公共 DTO 中不包含 `native`。平台原始目录、作答映射、开卷缓存、发布意图保存在宿主加密状态中，用户和模块之间隔离。stdout 只输出协议，日志写 stderr。
+
+## 恢复行为
+
+- 学习每段先等待，再保存。恢复时使用执行代次重新计时，不把暂停时间算作学习时间。
+- 智慧课程长试卷每次读取少量题目；继续使用原开卷缓存，不重复 `openExam`。
+- 草稿排除平台已有答案；人工修改需要宿主提供显式覆盖许可。
+- 交卷前宿主保存操作锁。响应未知时只回读原作答，不重复交卷。
+- 问答发布前保存意图；没有确认平台记录编号时停止，不自动重发。
+- 见面课使用官方页面和播放器，保留其旧版 `Map` 行为；加载观看历史后寻找缺失分钟，不伪造签到。
+- 验证码、人脸、额外考试验证、未开放活动、无回放和未知控件保留人工处理状态。
+
+模块是可信二进制，协议约束不能替代操作系统沙箱。框架的网络白名单约束宿主 HTTP 请求及浏览器入口，Chromium 仍自行加载官方页面内部资源。
+
+## 目录
+
+```text
+src/
+  main.rs、rpc.rs、host.rs   进程、协议与宿主调用
+  platform.rs、error.rs      描述、方法分派和错误类型
+  zhs/
+    session.rs              扫码与 SSO
+    live.rs、crypto.rs       共享课协议、动态网关密钥与签名
+    catalog.rs、study.rs     公共课程及离线学习样例
+    features/
+      assessment.rs         共享课和智慧课程作业考试
+      mastery.rs            掌握度图谱、练习和结果
+      smart.rs              智慧课程资源
+      questions.rs          题目、原答案及图片解析
+      operations.rs         扩展接口、问答和见面课
+      meeting.js            官方回放页面驱动
+      types.rs              模块内部的平台私有记录
+fixtures/                   无真实账号的离线目录样例
+tests/contract.rs           模拟宿主与真实协议读写测试
+```
+
+## 验证范围
+
+Cargo 测试包含清单一致性、扫码样例、公共字段、学习检查点、已完成跳过、签名向量、网关密钥、分段读取试卷和未知开卷防重发。框架另有 release 二进制的 fixture 集成测试，覆盖网页 API、人工补答、交卷确认和导出。
+
+真实账号验收流程见[框架部署说明](../courseflow-framework/docs/LOCAL-DEPLOYMENT.md)。学习写入、完整见面课签到、正式交卷和实际模型调用在本次实现中没有作为真实账号验收通过项。
+
+## 许可证与来源
+
+部分作业考试、掌握度、资源及页面协议适配自 Courseweave，依据 MIT 许可保留 [LICENSE](LICENSE)。Studia 仅作为功能和行为参考。第三方许可证原文保留，以便正确保留版权及授权条件；项目说明文档使用简体中文。
