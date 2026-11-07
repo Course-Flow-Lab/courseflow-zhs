@@ -1,6 +1,6 @@
 # Courseflow 智慧树模块
 
-`courseflow-zhs` 是智慧树平台的独立 Rust 模块，通过 stdin／stdout 的 NDJSON JSON-RPC 接入 [Courseflow 框架](../courseflow-framework)。模块 API 为 1，当前模块版本为 0.3.0，需要框架 `>=0.1.1 <0.2.0`。
+`courseflow-zhs` 是智慧树平台的独立 Rust 模块，通过 stdin／stdout 的 NDJSON JSON-RPC 接入 [Courseflow 框架](https://github.com/Course-Flow-Lab/courseflow-framework)。模块 API 为 1，当前模块版本为 0.3.0，需要框架 `>=0.1.1 <0.2.0`。
 
 平台协议和官方页面脚本在本仓库；HTTP 凭据、Cookie 容器、持久化加密、模型密钥、浏览器进程和任务调度由框架管理。Studia 只供开发时对照，不在运行时导入或启动。
 
@@ -70,7 +70,7 @@ fixture 的二维码和成绩为样例。真实账号部署必须明确使用 `l
 - `qa.board/posts`：课程问题和当前账号发布记录。
 - `activity.step`：见面课、回答和提问的分步执行。
 
-所有外部访问通过 `cw.net.fetch`、`cw.state`、`cw.session.identity`、`cw.browser.*`、`cw.peers.*`、`cw.clock.now` 和 `cw.log`。模型生成由宿主编排，模块不接收模型密钥。完整 DTO 和调用约定见框架的[中文模块协议](../courseflow-framework/spec/module-api-v1.md)。
+所有外部访问通过 `cw.net.fetch`、`cw.state`、`cw.session.identity`、`cw.browser.*`、`cw.peers.*`、`cw.clock.now` 和 `cw.log`。模型生成由宿主编排，模块不接收模型密钥。完整 DTO 和调用约定见框架的[中文模块协议](https://github.com/Course-Flow-Lab/courseflow-framework/blob/main/spec/module-api-v1.md)。
 
 公共 DTO 中不包含 `native`。平台原始目录、作答映射、开卷缓存、发布意图保存在宿主加密状态中，用户和模块之间隔离。stdout 只输出协议，日志写 stderr。
 
@@ -112,7 +112,7 @@ tests/contract.rs           模拟宿主与真实协议读写测试
 
 Cargo 测试包含清单一致性、扫码样例、公共字段、学习检查点、已完成跳过、签名向量、网关密钥、分段读取试卷和未知开卷防重发。框架另有 release 二进制的 fixture 集成测试，覆盖网页 API、人工补答、交卷确认和导出。
 
-真实账号验收流程见[框架部署说明](../courseflow-framework/docs/LOCAL-DEPLOYMENT.md)。学习写入、完整见面课签到、正式交卷和实际模型调用在本次实现中没有作为真实账号验收通过项。
+真实账号验收流程见[框架部署说明](https://github.com/Course-Flow-Lab/courseflow-framework/blob/main/docs/LOCAL-DEPLOYMENT.md)。学习写入、完整见面课签到、正式交卷和实际模型调用在本次实现中没有作为真实账号验收通过项。
 
 ## 许可证与来源
 
