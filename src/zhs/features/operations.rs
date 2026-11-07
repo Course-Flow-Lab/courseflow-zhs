@@ -603,7 +603,9 @@ fn meeting_step(client: &FeatureClient, course: &catalog::Course, params: &Value
         cp = json!({});
     }
     if cp["execution_id"] != params["options"]["execution_id"] {
-        cp.as_object_mut().expect("对象").remove("page");
+        for field in ["page", "snapshot", "idle_since", "auth_wait_since"] {
+            cp.as_object_mut().expect("对象").remove(field);
+        }
         cp["execution_id"] = params["options"]["execution_id"].clone();
     }
     let page = if let Some(page) = cp["page"].as_str() {
@@ -633,10 +635,24 @@ fn meeting_step(client: &FeatureClient, course: &catalog::Course, params: &Value
         include_str!("meeting.js").into(),
         "save_study",
     )?;
+    let now = client.host.now()?;
+    if snapshot["authentication_required"] == true {
+        return Err(login_expired());
+    }
+    if snapshot["auth_redirect"] == true {
+        let since = cp["auth_wait_since"].as_i64().unwrap_or(now);
+        cp["auth_wait_since"] = json!(since);
+        if now - since >= 30 {
+            return Err(login_expired());
+        }
+        return Ok(
+            json!({"status":"in_progress","detail":"正在同步官方播放器登录态","checkpoint":cp,"wait_ms":1000}),
+        );
+    }
+    cp.as_object_mut().expect("对象").remove("auth_wait_since");
     if snapshot["blocked"].is_string() {
         return Ok(json!({"status":"needs_human","reason":snapshot["blocked"],"checkpoint":cp}));
     }
-    let now = client.host.now()?;
     let previous = cp["snapshot"].clone();
     let unchanged = previous == snapshot;
     cp["idle_since"] = if unchanged {
@@ -651,7 +667,7 @@ fn meeting_step(client: &FeatureClient, course: &catalog::Course, params: &Value
         );
     }
     Ok(
-        json!({"status":"in_progress","detail":format!("官方回放 · 签到进度 {}",text(&snapshot["percent"])),"progress":{"percent":snapshot["percent"]},"wait_ms":5000,"checkpoint":cp}),
+        json!({"status":"in_progress","detail":if snapshot["loading"]==true { "正在加载官方回放和观看历史".into() } else { format!("官方回放 · 签到进度 {}",text(&snapshot["percent"])) },"progress":{"percent":snapshot["percent"]},"wait_ms":5000,"checkpoint":cp}),
     )
 }
 
@@ -906,7 +922,7 @@ fn qa_step(client: &FeatureClient, course: &catalog::Course, params: &Value) -> 
             json!({"status":"unknown","reason":"平台未返回发布编号，请核对官方记录","checkpoint":cp}),
         );
     }
-    let record = json!({"kind":kind,"course_id":course.id,"recruit_id":course.recruit_id,"question_id":id,"content":output,"platform_id":platform_id,"created_at":now});
+    let record = json!({"kind":kind,"course_id":course.id,"recruit_id":course.recruit_id,"question_id":id,"question":if ask {output.clone()} else {text(&item["content"])},"content":output,"platform_id":platform_id,"created_at":now});
     posts.push(record.clone());
     client
         .host
@@ -952,11 +968,15 @@ fn fixture(
             json!({"meetings":[{"id":"fixture-meeting","name":"离线见面课","replay_available":true}]}),
         ),
         "catalog.score" => Ok(
-            json!({"rules":{"habit":10,"interactive":10},"scores":{"totalScore":42},"habit":2,"interactive":3}),
+            json!({"rules":{"habit":10,"interactive":10},"scores":{"totalScore":42},"habit":2,"interactive":3,"qa":{"validQuestionAmount":3,"validAnswerAmount":8,"getAnswer":12}}),
         ),
-        "qa.board" | "qa.posts" => Ok(
+        "qa.board" => Ok(
             json!({"ready":true,"posts":[{"id":"fixture-question","content":"如何理解课程中的基本概念？","answers":0,"mine":false}]}),
         ),
+        "qa.posts" => Ok(json!({"posts":[
+            {"kind":"question","content":"如何将课程理论应用到日常学习？","question":"如何将课程理论应用到日常学习？","platform_id":"fixture-question","created_at":host.now()?-120},
+            {"kind":"answer","content":"可以先明确概念，再用具体情境检验理解。此条为离线展示记录。","question":"如何理解课程中的基本概念？","question_id":"fixture-question","platform_id":"fixture-answer","created_at":host.now()?-60}
+        ]})),
         "activity.step" => {
             Ok(json!({"status":"completed","detail":"离线活动已完成，不会调用真实平台"}))
         }

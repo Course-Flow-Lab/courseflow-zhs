@@ -1,6 +1,6 @@
 # Courseflow 智慧树模块
 
-`courseflow-zhs` 是智慧树平台的独立 Rust 模块，通过 stdin／stdout 的 NDJSON JSON-RPC 接入 [Courseflow 框架](https://github.com/Course-Flow-Lab/courseflow-framework)。模块 API 为 1，当前模块版本为 0.3.0，需要框架 `>=0.1.1 <0.2.0`。
+`courseflow-zhs` 是智慧树平台的独立 Rust 模块，通过 stdin／stdout 的 NDJSON JSON-RPC 接入 [Courseflow 框架](https://github.com/Course-Flow-Lab/courseflow-framework)。模块 API 为 1，当前模块版本为 0.3.1，需要框架 `>=0.1.2 <0.2.0`。
 
 平台协议和官方页面脚本在本仓库；HTTP 凭据、Cookie 容器、持久化加密、模型密钥、浏览器进程和任务调度由框架管理。Studia 只供开发时对照，不在运行时导入或启动。
 
@@ -12,8 +12,8 @@
 | --- | --- |
 | 模块 id／平台 id | `zhs` |
 | 名称 | 智慧树 |
-| 版本／`moduleApi` | 0.3.0／1 |
-| 框架范围 | `engines.framework`: `>=0.1.1 <0.2.0` |
+| 版本／`moduleApi` | 0.3.1／1 |
+| 框架范围 | `engines.framework`: `>=0.1.2 <0.2.0` |
 | 运行形态 | `runtime.engine`: `binary`，入口 `target/release/courseflow-zhs` |
 | 登录方式 | `qr`（扫码） |
 | 声明操作 | `study`、`answer`、`review`、`meeting`、`mastery`、`qa`、`ask`、`trial` |
@@ -108,7 +108,7 @@ fixture 的二维码和成绩为样例。真实账号部署必须明确使用 `l
 - 草稿排除平台已有答案；人工修改需要宿主提供显式覆盖许可。
 - 交卷前宿主保存操作锁。响应未知时只回读原作答，不重复交卷。
 - 问答发布前保存意图；没有确认平台记录编号时停止，不自动重发。
-- 见面课使用官方页面和播放器，保留其旧版 `Map` 行为；加载观看历史后寻找缺失分钟，不伪造签到。
+- 见面课使用官方页面和播放器，保留其旧版 `Map` 行为；加载观看历史后寻找缺失分钟，不伪造签到。框架 0.1.2 保留父域登录 Cookie 的作用范围，模块给正常登录跳转保留最多三十秒；持续跳转或平台明确鉴权失败时暂停任务，重新连接后可核对并继续。
 - 验证码、人脸、额外考试验证、未开放活动、无回放和未知控件保留人工处理状态。
 
 模块是可信二进制，协议约束不能替代操作系统沙箱。框架的网络白名单约束宿主 HTTP 请求及浏览器入口，Chromium 仍自行加载官方页面内部资源。
@@ -137,7 +137,7 @@ tests/contract.rs           模拟宿主与真实协议读写测试
 
 ## 验证范围
 
-Cargo 测试包含清单一致性、扫码样例、公共字段、学习检查点、已完成跳过、签名向量、网关密钥、分段读取试卷和未知开卷防重发。框架另有 release 二进制的 fixture 集成测试，覆盖网页 API、人工补答、交卷确认和导出。
+Cargo 测试包含清单一致性、扫码样例、公共字段、学习检查点、已完成跳过、签名向量、网关密钥、分段读取试卷、未知开卷防重发，以及见面课短暂登录跳转和持续登录过期的区分。框架另有 release 二进制的 fixture 集成测试，覆盖网页 API、人工补答、交卷确认和导出，并检查 Cookie 作用范围和官方页面脚本。
 
 真实账号验收流程见[框架部署说明](https://github.com/Course-Flow-Lab/courseflow-framework/blob/main/docs/LOCAL-DEPLOYMENT.md)。学习写入、完整见面课签到、正式交卷和实际模型调用在本次实现中没有作为真实账号验收通过项。
 
