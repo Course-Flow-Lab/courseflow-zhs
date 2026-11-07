@@ -12,7 +12,7 @@ use std::collections::HashMap;
 use std::sync::Mutex;
 
 use base64::Engine;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 
 use crate::error::ModuleError;
 use crate::host::{Encoding, FetchRequest, Host, Stage};
@@ -135,7 +135,11 @@ pub fn finish_login(host: &dyn Host, session: &str, reply: &Value) -> Result<Val
     let uuid = id_string(&reply["uuid"])
         .ok_or_else(|| ModuleError::protocol_changed("扫码结果缺少 uuid"))?;
 
-    let abnormal_url = format!("{}{}", endpoints::PASSPORT_BASE, endpoints::ABNORMAL_LOGIN_PATH);
+    let abnormal_url = format!(
+        "{}{}",
+        endpoints::PASSPORT_BASE,
+        endpoints::ABNORMAL_LOGIN_PATH
+    );
     let abnormal = fetch_json(
         host,
         FetchRequest {
@@ -162,7 +166,10 @@ pub fn finish_login(host: &dyn Host, session: &str, reply: &Value) -> Result<Val
         endpoints::PASSPORT_BASE,
         endpoints::PASSPORT_LOGIN_PATH,
         encode_component(once_password),
-        encode_component(&format!("{service}?fromurl={}", encode_component(endpoints::COURSE_LOGIN_FROM))),
+        encode_component(&format!(
+            "{service}?fromurl={}",
+            encode_component(endpoints::COURSE_LOGIN_FROM)
+        )),
     );
     let _ = fetch_json_or_page(host, FetchRequest::get(session, login_url))?;
 
@@ -171,7 +178,10 @@ pub fn finish_login(host: &dyn Host, session: &str, reply: &Value) -> Result<Val
 }
 
 /// Some Passport responses are HTML redirects, so a non-JSON 2xx is not an error here.
-fn fetch_json_or_page(host: &dyn Host, request: FetchRequest) -> Result<Option<Value>, ModuleError> {
+fn fetch_json_or_page(
+    host: &dyn Host,
+    request: FetchRequest,
+) -> Result<Option<Value>, ModuleError> {
     let response = super::fetch(host, request)?;
     Ok(serde_json::from_str(&response.body).ok())
 }
@@ -204,7 +214,11 @@ pub fn verify(host: &dyn Host, session: &str) -> Result<Value, ModuleError> {
 
 /// Shared courses (signed, paginated) plus the AI/智慧课程 list. Returns the courses and the
 /// opaque per-course `secret` entries that the outline and study calls need.
-pub fn courses(host: &dyn Host, keys: &Keys, session: &str) -> Result<(Vec<Course>, Value), ModuleError> {
+pub fn courses(
+    host: &dyn Host,
+    keys: &Keys,
+    session: &str,
+) -> Result<(Vec<Course>, Value), ModuleError> {
     let key = protocol_key(host, keys, session, 13)?;
     let mut entries = serde_json::Map::new();
     let mut courses: Vec<Course> = Vec::new();
@@ -283,7 +297,11 @@ fn ai_courses(host: &dyn Host, session: &str, key: &[u8]) -> Result<Vec<Value>, 
     match number(&reply["code"]) {
         Some(200) => {}
         Some(401 | 403 | 5008) => return Err(ModuleError::login_expired("智慧树登录已失效")),
-        _ => return Err(ModuleError::protocol_changed("智慧课程列表返回了未预期的 code")),
+        _ => {
+            return Err(ModuleError::protocol_changed(
+                "智慧课程列表返回了未预期的 code",
+            ));
+        }
     }
     Ok(reply
         .get("rt")
@@ -297,8 +315,8 @@ fn shared_course(row: &Value) -> Result<Course, ModuleError> {
     let id = id_string(&row["courseId"])
         .or_else(|| id_string(&row["id"]))
         .ok_or_else(|| ModuleError::protocol_changed("课程缺少 courseId"))?;
-    let recruit_id =
-        id_string(&row["recruitId"]).ok_or_else(|| ModuleError::protocol_changed("课程缺少 recruitId"))?;
+    let recruit_id = id_string(&row["recruitId"])
+        .ok_or_else(|| ModuleError::protocol_changed("课程缺少 recruitId"))?;
     let name = row["courseName"]
         .as_str()
         .filter(|value| !value.is_empty())
@@ -346,7 +364,7 @@ fn ai_course(row: &Value) -> Option<Course> {
         family: Some("smart".to_owned()),
         progress,
         // The smart outline is a different gateway; not ported in this pass.
-        outline_available: false,
+        outline_available: true,
     })
 }
 
@@ -504,11 +522,15 @@ fn parse_outline(course: &Course, reply: &Value) -> Result<Vec<ParsedVideo>, Mod
             .ok_or_else(|| ModuleError::protocol_changed("章节缺少 id"))?;
         let chapter_name = display_name(chapter, "未命名章节");
         for lesson in array_or_empty(&chapter["videoLessons"])? {
-            let lesson_id =
-                id_string(&lesson["id"]).ok_or_else(|| ModuleError::protocol_changed("小节缺少 id"))?;
+            let lesson_id = id_string(&lesson["id"])
+                .ok_or_else(|| ModuleError::protocol_changed("小节缺少 id"))?;
             let children = array_or_empty(&lesson["videoSmallLessons"])?;
             let small = !children.is_empty();
-            for row in if small { children } else { std::slice::from_ref(lesson) } {
+            for row in if small {
+                children
+            } else {
+                std::slice::from_ref(lesson)
+            } {
                 let id = id_string(&row["id"])
                     .ok_or_else(|| ModuleError::protocol_changed("视频缺少 id"))?;
                 videos.push(ParsedVideo {
@@ -717,7 +739,10 @@ impl Prepared {
                 .get("small_lesson_id")
                 .and_then(Value::as_str)
                 .map(str::to_owned),
-            limited: value.get("limited").and_then(Value::as_bool).unwrap_or(false),
+            limited: value
+                .get("limited")
+                .and_then(Value::as_bool)
+                .unwrap_or(false),
             school_id: value.get("school_id").cloned().unwrap_or(json!(0)),
         })
     }
@@ -887,8 +912,8 @@ pub fn prepare(
         ));
     }
     let record = &data["studiedLessonDto"];
-    let record_id = id_string(&record["id"])
-        .ok_or_else(|| ModuleError::protocol_changed("视频记录缺少 id"))?;
+    let record_id =
+        id_string(&record["id"]).ok_or_else(|| ModuleError::protocol_changed("视频记录缺少 id"))?;
     let position = number(&record["learnTimeSec"])
         .filter(|value| *value >= 0 && *value <= duration)
         .ok_or_else(|| ModuleError::protocol_changed("视频记录缺少 learnTimeSec"))?;
@@ -969,6 +994,17 @@ pub fn answer_popup(
     unit: &Unit,
     question_ids: &Value,
 ) -> Result<bool, ModuleError> {
+    Ok(popup_answers(host, keys, session, course, unit, question_ids, &json!({}))?.is_empty())
+}
+pub fn popup_answers(
+    host: &dyn Host,
+    keys: &Keys,
+    session: &str,
+    course: &Course,
+    unit: &Unit,
+    question_ids: &Value,
+    supplied: &Value,
+) -> Result<Vec<super::features::types::Question>, ModuleError> {
     let key = protocol_key(host, keys, session, 11)?;
     let origin = "https://studyvideoh5.zhihuishu.com";
     let reply = signed_post(
@@ -990,8 +1026,10 @@ pub fn answer_popup(
         .as_array()
         .ok_or_else(|| ModuleError::protocol_changed("弹题响应缺少题目数组"))?;
     if items.is_empty() {
-        return Ok(false);
+        return Err(ModuleError::protocol_changed("弹题没有可处理的题目"));
     }
+    let mut pending = Vec::new();
+    let mut writes = Vec::new();
     for item in items {
         let raw = &item["testQuestion"];
         let id = id_string(&raw["questionId"])
@@ -1002,9 +1040,34 @@ pub fn answer_popup(
             .filter(|option| number(&option["result"]) == Some(1))
             .filter_map(|option| id_string(&option["id"]))
             .collect();
-        if provided.is_empty() {
-            return Ok(false);
-        }
+        let answer = if provided.is_empty() {
+            let mut raw = raw.clone();
+            raw["eid"] = json!(id);
+            let question = super::features::normalize_popup(&raw)?;
+            let manual: Vec<String> = supplied
+                .get(&id)
+                .and_then(Value::as_array)
+                .map(|a| {
+                    a.iter()
+                        .filter_map(Value::as_str)
+                        .map(str::to_owned)
+                        .collect()
+                })
+                .unwrap_or_default();
+            if !super::features::types::validate_answer(&question, &manual) {
+                pending.push(question);
+                continue;
+            }
+            manual
+        } else {
+            provided
+        };
+        writes.push((id, answer));
+    }
+    if !pending.is_empty() {
+        return Ok(pending);
+    }
+    for (id, answer) in writes {
         let reply = signed_post(
             host,
             session,
@@ -1017,7 +1080,7 @@ pub fn answer_popup(
                 "isCurrent": "1",
                 "lessonId": remote_id(&unit.lesson_id),
                 "lessonVideoId": remote_id(&unit.id),
-                "answer": provided.join(","),
+                "answer": answer.join(","),
                 "testType": 0,
             }),
             &key,
@@ -1027,17 +1090,17 @@ pub fn answer_popup(
         match number(&reply["code"]) {
             Some(0) => {}
             Some(401 | 403 | 5008) => {
-                return Err(ModuleError::login_expired("智慧树登录已失效，请重新扫码"))
+                return Err(ModuleError::login_expired("智慧树登录已失效，请重新扫码"));
             }
             Some(code) => {
                 return Err(ModuleError::protocol_changed(format!(
                     "保存弹题答案返回了未预期的 code {code}"
-                )))
+                )));
             }
             None => return Err(ModuleError::protocol_changed("保存弹题答案响应缺少 code")),
         }
     }
-    Ok(true)
+    Ok(vec![])
 }
 
 /// `saveDatabaseIntervalTimeV2`: one chunk of watched seconds with its watch points.
@@ -1057,14 +1120,24 @@ pub fn save(
     let key = protocol_key(host, keys, session, 11)?;
     let origin = "https://studyvideoh5.zhihuishu.com";
     if prepared.limited {
-        study_limit(host, session, &course.recruit_id, &prepared.school_id, &key, origin)?;
+        study_limit(
+            host,
+            session,
+            &course.recruit_id,
+            &prepared.school_id,
+            &key,
+            origin,
+        )?;
     }
     let after = prepared.position + seconds;
-    let points = watch_points(prepared.total, seconds);
+    let points = watch_points(prepared.position, seconds);
     let fields = vec![
         course.recruit_id.clone(),
         prepared.lesson_id.clone(),
-        prepared.small_lesson_id.clone().unwrap_or_else(|| "0".to_owned()),
+        prepared
+            .small_lesson_id
+            .clone()
+            .unwrap_or_else(|| "0".to_owned()),
         prepared.media_id.clone(),
         prepared.chapter_id.clone(),
         "0".to_owned(),
@@ -1162,7 +1235,8 @@ fn flag(value: &Value) -> Result<bool, ModuleError> {
 }
 
 fn remote_id(id: &str) -> Value {
-    id.parse::<u64>().map_or_else(|_| json!(id), |value| json!(value))
+    id.parse::<u64>()
+        .map_or_else(|_| json!(id), |value| json!(value))
 }
 
 #[cfg(test)]
@@ -1240,7 +1314,7 @@ mod tests {
     }
 
     #[test]
-    fn ai_course_rows_map_to_a_smart_course_without_an_outline() {
+    fn ai_course_rows_map_to_a_smart_course_with_an_outline() {
         let row = json!({
             "courseId": "3000112233",
             "classId": "4000445566",
@@ -1251,11 +1325,114 @@ mod tests {
         assert_eq!(course.kind, "smart");
         assert_eq!(course.family.as_deref(), Some("smart"));
         assert_eq!(course.progress, Some(12.0));
-        assert!(!course.outline_available);
+        assert!(course.outline_available);
     }
 
     #[test]
     fn url_component_encoding_is_strict() {
         assert_eq!(encode_component("a b/c+d="), "a%20b%2Fc%2Bd%3D");
+    }
+    #[test]
+    fn smart_paper_reads_in_batches_without_reopening_or_writing_readonly() {
+        use crate::host::FetchResponse;
+        use crate::zhs::features::{FeatureClient, types};
+        use std::collections::VecDeque;
+        struct HostMock {
+            replies: Mutex<VecDeque<Value>>,
+            requests: Mutex<Vec<FetchRequest>>,
+            state: Mutex<HashMap<(String, String), Value>>,
+        }
+        impl Host for HostMock {
+            fn now(&self) -> Result<i64, ModuleError> {
+                Ok(1000)
+            }
+            fn fetch(&self, r: &FetchRequest) -> Result<FetchResponse, ModuleError> {
+                self.requests.lock().unwrap().push(r.clone());
+                let v = self.replies.lock().unwrap().pop_front().expect("预置响应");
+                Ok(FetchResponse {
+                    status: 200,
+                    headers: Default::default(),
+                    body: v.to_string(),
+                })
+            }
+            fn state_get(&self, n: &str, k: &str, _s: &str) -> Result<Value, ModuleError> {
+                Ok(self
+                    .state
+                    .lock()
+                    .unwrap()
+                    .get(&(n.into(), k.into()))
+                    .cloned()
+                    .unwrap_or(Value::Null))
+            }
+            fn state_set(&self, n: &str, k: &str, v: &Value, _s: &str) -> Result<(), ModuleError> {
+                self.state
+                    .lock()
+                    .unwrap()
+                    .insert((n.into(), k.into()), v.clone());
+                Ok(())
+            }
+            fn log(&self, _l: &str, _m: &str, _v: Value) {}
+        }
+        let replies=std::iter::once(json!({"code":0,"data":{}})).chain(std::iter::once(json!({"code":0,"data":{"questionCount":8,"partSheetVos":[{"questionSheetVos":(1..=8).map(|n|json!({"questionId":n,"version":1})).collect::<Vec<_>>()}]}}))).chain((1..=8).map(|n|json!({"code":0,"data":{"questionInfo":{"id":n,"content":"题干","questionType":1,"optionVos":[{"id":"a","content":"甲"},{"id":"b","content":"乙"}],"userAnswer":"a"}}}))).collect();
+        let host = HostMock {
+            replies: Mutex::new(replies),
+            requests: Mutex::new(vec![]),
+            state: Mutex::new(HashMap::new()),
+        };
+        let keys = Keys::default();
+        keys.put("s", 5, b"0123456789abcdef".to_vec());
+        let client = FeatureClient {
+            host: &host,
+            keys: &keys,
+            session: "s",
+            request: "job/0",
+        };
+        let course:types::Course=serde_json::from_value(json!({"id":"1","recruit_id":"2","name":"课程","kind":"smart","progress":null,"outline_available":true})).unwrap();
+        let paper:types::Paper=serde_json::from_value(json!({"id":"p","name":"作业","category":"作业","available":true,"done":false,"reason":"","status_label":"","score":null,"attempts_left":null,"opens_at":null,"ends_at":null,"native":{"examTestId":"3","paperId":"4","_exam":false}})).unwrap();
+        let first = client.feature_open(&course, &paper).unwrap();
+        assert_eq!(first.questions.len(), 6);
+        assert_eq!(first.native["partial"], true);
+        let second = client.feature_open(&course, &paper).unwrap();
+        assert_eq!(second.questions.len(), 8);
+        assert_eq!(second.native["partial"], false);
+        assert_eq!(
+            host.requests
+                .lock()
+                .unwrap()
+                .iter()
+                .filter(|r| r.url.ends_with("openExam"))
+                .count(),
+            1
+        );
+        assert_eq!(second.questions[0].answer, vec!["a"]);
+        let mut readonly = paper.clone();
+        readonly.done = true;
+        let before = host.requests.lock().unwrap().len();
+        let view = client.feature_open(&course, &readonly).unwrap();
+        assert_eq!(view.questions.len(), 8);
+        assert_eq!(host.requests.lock().unwrap().len(), before);
+        assert!(
+            client
+                .feature_writes(&course, &view, &HashMap::new(), false)
+                .is_err()
+        );
+        // 开卷结果未知时不能再次发送 openExam。
+        host.state_set("exam_open", "1/2/p/unknown", &json!({"started":true}), "s")
+            .unwrap();
+        let unknown = FeatureClient {
+            host: &host,
+            keys: &keys,
+            session: "s",
+            request: "unknown",
+        };
+        assert!(
+            unknown
+                .feature_open(&course, &paper)
+                .err()
+                .unwrap()
+                .message
+                .contains("不会重复开卷")
+        );
+        assert_eq!(host.requests.lock().unwrap().len(), before);
     }
 }

@@ -17,15 +17,15 @@ use std::{
     io::{self, BufRead, BufWriter, Write},
     panic,
     sync::{
+        Arc, Condvar, Mutex,
         atomic::{AtomicU64, Ordering},
         mpsc::{self, RecvTimeoutError, SyncSender},
-        Arc, Condvar, Mutex,
     },
     thread::{self, JoinHandle},
     time::{Duration, Instant},
 };
 
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 
 use crate::error::ModuleError;
 

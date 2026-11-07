@@ -17,10 +17,14 @@ use courseflow_zhs::zhs::{Settings, Zhs};
 fn main() {
     let raw_settings = std::env::var("CF_MODULE_SETTINGS").ok();
     let (settings, warnings) = Settings::from_env(raw_settings.as_deref());
+    let invalid = !warnings.is_empty();
     for warning in warnings {
         eprintln!("courseflow-zhs: {warning}");
     }
 
+    if invalid {
+        process::exit(2);
+    }
     let api = Arc::new(Zhs::new(settings));
     let client = Arc::new(RpcClient::new(io::stdout()));
     let host = Arc::new(CwHost::new(Arc::clone(&client)));

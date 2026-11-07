@@ -9,10 +9,10 @@ use std::io::Write;
 use std::sync::atomic::{AtomicI64, Ordering};
 use std::sync::{Arc, Mutex};
 
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 
 use courseflow_zhs::error::ModuleError;
-use courseflow_zhs::host::{Encoding, FetchRequest, FetchResponse, Host};
+use courseflow_zhs::host::{FetchRequest, FetchResponse, Host};
 use courseflow_zhs::platform::{self, PlatformApi};
 use courseflow_zhs::rpc::{self, Handler, RpcClient};
 use courseflow_zhs::zhs::{Settings, Source, Zhs};
@@ -140,22 +140,6 @@ fn fixture_units(api: &Zhs, host: &MockHost, course: &Value) -> Vec<Value> {
     result["units"].as_array().unwrap().clone()
 }
 
-fn sample_unit() -> Value {
-    json!({
-        "id": "9001",
-        "name": "1.1 什么是心理健康",
-        "chapter_id": "5001",
-        "chapter_name": "第一章 心理健康概述",
-        "lesson_id": "6001",
-        "kind": "video",
-        "duration_seconds": 480,
-        "watched_seconds": 312,
-        "state": "in_progress",
-        "video_id": "v1001",
-        "selectable": true
-    })
-}
-
 // --- 1. descriptor matches the manifest ------------------------------------------
 
 #[test]
@@ -180,7 +164,9 @@ fn descriptor_matches_manifest() {
     assert_eq!(result["platform"]["login"], json!(["qr"]));
     assert_eq!(
         result["platform"]["operations"],
-        json!(["study", "answer", "review", "meeting", "mastery", "qa", "ask"])
+        json!([
+            "study", "answer", "review", "meeting", "mastery", "qa", "ask", "trial"
+        ])
     );
     assert_eq!(
         result["platform"]["unit_kinds"],
@@ -196,10 +182,10 @@ fn descriptor_matches_manifest() {
         "target/release/courseflow-zhs"
     );
     // `when` keys are framework-evaluated and must use the documented vocabulary.
-    let tab = &result["platform"]["presentation"]["tabs"][0];
+    let tab = &result["platform"]["presentation"]["tabs"][1];
     let action = &result["platform"]["presentation"]["actions"][0];
     assert_eq!(tab["when"]["course.kind"], "shared");
-    assert_eq!(action["when"]["course.family"], "shared");
+    assert_eq!(action["when"]["course.kind"], "shared");
 
     // The wire is documented in snake_case; no camelCase or `native` fields leak.
     for path in ["module", "platform"] {
@@ -244,7 +230,7 @@ fn course_fixture_parses_two_snake_case_courses() {
     assert_eq!(smart["id"], "3000112233");
     assert_eq!(smart["recruit_id"], "4000445566");
     assert_eq!(smart["kind"], "smart");
-    assert_eq!(smart["outline_available"], false);
+    assert_eq!(smart["outline_available"], true);
 
     for course in courses {
         for key in [
@@ -315,9 +301,11 @@ fn unit_fixture_marks_only_the_document_unselectable() {
         assert_eq!(unit["selectable"].as_bool(), Some(!is_document));
         if is_document {
             assert_eq!(unit["duration_seconds"].as_i64(), Some(0));
-            assert!(unit["selectable_note"]
-                .as_str()
-                .is_some_and(|note| !note.is_empty()));
+            assert!(
+                unit["selectable_note"]
+                    .as_str()
+                    .is_some_and(|note| !note.is_empty())
+            );
         } else {
             assert!(unit["selectable_note"].is_null());
             assert!(
@@ -459,10 +447,12 @@ fn fixture_auth_flow_is_self_contained() {
     assert_eq!(begin["challenge"]["id"], "ch_test");
     assert_eq!(begin["challenge"]["kind"], "qr");
     assert_eq!(begin["challenge"]["expires_at"], 1_700_000_120);
-    assert!(begin["challenge"]["image"]
-        .as_str()
-        .unwrap()
-        .starts_with("data:image/png;base64,"));
+    assert!(
+        begin["challenge"]["image"]
+            .as_str()
+            .unwrap()
+            .starts_with("data:image/png;base64,")
+    );
 
     let poll = || {
         call(
@@ -547,16 +537,27 @@ fn a_completed_unit_is_not_opened_again() {
 }
 
 #[test]
-fn live_methods_that_are_not_ported_are_still_typed_errors() {
+fn extension_methods_validate_context_before_network_access() {
     let api = live();
     let host = MockHost::default();
 
-    // Exam / activity gateways are not ported in this pass: a typed error, no network.
-    for method in ["catalog.papers", "exam.open", "activity.step", "route.invoke"] {
+    // 已实现的方法先检查所属课程，未知方法明确拒绝。
+    for method in ["catalog.papers", "exam.open", "activity.step"] {
         let error = expect_error(call(&api, &host, method, json!({ "session": "s_test" })));
-        assert_eq!(error.code, "unsupported_operation", "{method}");
+        assert_eq!(error.code, "invalid_params", "{method}");
     }
-    assert!(host.fetches().is_empty(), "未移植的方法不应发起网络调用");
+    assert!(host.fetches().is_empty(), "缺少上下文时不应发起网络调用");
+
+    assert_eq!(
+        expect_error(call(
+            &api,
+            &host,
+            "route.invoke",
+            json!({"session":"s_test"})
+        ))
+        .code,
+        "unsupported_operation"
+    );
 
     // A live challenge that this process never issued cannot be completed; that is a typed
     // session error, not a panic and not a network call.
@@ -628,12 +629,15 @@ fn live_course_call_starts_with_the_gateway_key_exchange() {
         fetches[0].url
     );
     // The RSA ciphertext is URL-encoded base64, never a raw JSON body.
-    assert!(fetches[0].url.contains("%2B") || fetches[0].url.contains("%2F") || fetches[0].url.contains("%3D"));
+    assert!(
+        fetches[0].url.contains("%2B")
+            || fetches[0].url.contains("%2F")
+            || fetches[0].url.contains("%3D")
+    );
     assert_eq!(fetches[0].session, "s_test");
     // Omitted stage means `read` per the contract; the request must never be a write stage.
     assert!(
-        fetches[0].stage.is_none()
-            || fetches[0].stage == Some(courseflow_zhs::host::Stage::Read)
+        fetches[0].stage.is_none() || fetches[0].stage == Some(courseflow_zhs::host::Stage::Read)
     );
 }
 
@@ -696,11 +700,65 @@ fn ndjson_round_trip_through_the_real_reader() {
         .map(|response| (response["id"].as_u64().unwrap(), response.clone()))
         .collect();
     assert_eq!(by_id.len(), 3);
-    assert!(responses
-        .iter()
-        .all(|response| response["jsonrpc"] == "2.0"));
+    assert!(
+        responses
+            .iter()
+            .all(|response| response["jsonrpc"] == "2.0")
+    );
 
     assert_eq!(by_id[&1]["result"]["platform"]["id"], "zhs");
     assert_eq!(by_id[&2]["result"]["courses"].as_array().unwrap().len(), 2);
     assert_eq!(by_id[&3]["error"]["code"], "unsupported_operation");
+}
+
+#[test]
+fn resumed_generation_waits_again_and_does_not_credit_paused_time() {
+    let api = live();
+    let host = MockHost::at(1000);
+    let course = fixture_course(&fixture(), &host);
+    let unit = fixture_units(&fixture(), &host, &course)[0].clone();
+    let checkpoint = json!({"phase":"running","record_id":"record","position":30,"total":30,"questions":[],"blocking_at":null,"duration":480,"media_id":"media","chapter_id":"chapter","lesson_id":"lesson","small_lesson_id":null,"limited":false,"school_id":0,"execution_id":"old","save_after":900});
+    let first = call(&api,&host,"study.step",json!({"session":"s_test","course":course,"unit":unit,"checkpoint":checkpoint,"options":{"execution_id":"new"}})).unwrap();
+    assert_eq!(first["status"], "in_progress");
+    assert_eq!(first["checkpoint"]["position"], 30);
+    assert_eq!(first["checkpoint"]["save_after"], 1030);
+    host.now.store(1010, Ordering::SeqCst);
+    let next = call(&api,&host,"study.step",json!({"session":"s_test","course":course,"unit":unit,"checkpoint":first["checkpoint"],"options":{"execution_id":"new"}})).unwrap();
+    assert_eq!(next["wait_ms"], 20000);
+    assert_eq!(next["progress"]["watched_seconds"], 30);
+    assert!(host.fetches().is_empty(), "等待真实时长前不能保存进度");
+}
+
+#[test]
+fn review_completion_preserves_original_total_and_reports_budget() {
+    let api = live();
+    let host = MockHost::at(1000);
+    let course = fixture_course(&fixture(), &host);
+    let mut unit = fixture_units(&fixture(), &host, &course)[0].clone();
+    unit["state"] = json!("completed");
+    let checkpoint = json!({"phase":"running","record_id":"record","position":60,"total":540,"questions":[],"blocking_at":null,"duration":60,"media_id":"media","chapter_id":"chapter","lesson_id":"lesson","small_lesson_id":null,"limited":false,"school_id":0});
+    let result=call(&api,&host,"study.step",json!({"session":"s_test","course":course,"unit":unit,"checkpoint":checkpoint,"options":{"operation":"review","review_seconds":60,"speedup":true}})).unwrap();
+    assert_eq!(result["status"], "completed");
+    assert_eq!(result["checkpoint"]["total"], 540);
+    assert_eq!(result["evidence"]["reviewed_seconds"], 60);
+    assert_eq!(result["evidence"]["original_state_preserved"], true);
+    assert!(host.fetches().is_empty());
+}
+
+#[test]
+fn popup_normalization_keeps_images_and_unknown_types_require_manual_handling() {
+    use courseflow_zhs::zhs::features::{normalize_popup, types::validate_answer};
+    let question=normalize_popup(&json!({"eid":"q","questionType":1,"name":"<p>题干<img src=\"https://example.zhihuishu.com/question.png\"></p>","questionOptions":[{"id":"a","content":"甲"},{"id":"b","content":"乙"}]})).unwrap();
+    assert_eq!(question.kind, "single");
+    assert!(question.text.contains("题干"));
+    assert!(!question.text.contains("<p>"));
+    assert_eq!(
+        question.images,
+        vec!["https://example.zhihuishu.com/question.png"]
+    );
+    assert!(validate_answer(&question, &["a".into()]));
+    let unsupported =
+        normalize_popup(&json!({"eid":"q2","questionType":999,"name":"未知题型"})).unwrap();
+    assert_eq!(unsupported.kind, "unsupported");
+    assert!(!validate_answer(&unsupported, &["猜测".into()]));
 }

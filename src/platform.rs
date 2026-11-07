@@ -6,7 +6,7 @@
 use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
-use serde_json::{json, Map, Value};
+use serde_json::{Map, Value, json};
 
 use crate::error::ModuleError;
 use crate::host::Host;
@@ -26,6 +26,8 @@ pub struct PlatformDescriptor {
     pub unit_kinds: Vec<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub max_speed: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub keepalive_seconds: Option<u64>,
     pub presentation: Presentation,
 }
 
@@ -40,41 +42,27 @@ pub struct PresentationItem {
     pub id: String,
     pub label: String,
     /// Evaluated by the framework, never by the module (module API §1).
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub when: BTreeMap<String, String>,
 }
 
 /// The single source of truth for the runtime descriptor. Must equal the `platform`
 /// object in `courseflow.module.json`; `tests/contract.rs` enforces that.
 pub fn manifest_platform() -> PlatformDescriptor {
-    PlatformDescriptor {
-        id: "zhs".to_owned(),
-        name: "智慧树".to_owned(),
-        short: "智慧树".to_owned(),
-        login: vec!["qr".to_owned()],
-        operations: [
-            "study", "answer", "review", "meeting", "mastery", "qa", "ask",
-        ]
-        .iter()
-        .map(|operation| (*operation).to_owned())
-        .collect(),
-        unit_kinds: vec!["video".to_owned(), "document".to_owned()],
-        max_speed: Some(1.5),
-        presentation: Presentation {
-            tabs: vec![PresentationItem {
-                id: "qa".to_owned(),
-                label: "问答区".to_owned(),
-                when: BTreeMap::from([("course.kind".to_owned(), "shared".to_owned())]),
-            }],
-            actions: vec![PresentationItem {
-                id: "trial".to_owned(),
-                label: "短时试跑".to_owned(),
-                when: BTreeMap::from([("course.family".to_owned(), "shared".to_owned())]),
-            }],
-        },
-    }
+    let manifest: Value = serde_json::from_str(include_str!("../courseflow.module.json"))
+        .expect("构建时模块清单应合法");
+    serde_json::from_value(manifest["platform"].clone()).expect("模块平台描述应合法")
 }
 
 pub trait PlatformApi: Send + Sync {
+    fn extension(
+        &self,
+        _host: &dyn Host,
+        method: &str,
+        _params: &Value,
+    ) -> Result<Value, ModuleError> {
+        Err(ModuleError::unsupported(format!("模块未提供 {method}")))
+    }
     fn describe(&self) -> PlatformDescriptor;
 
     fn auth_begin(
@@ -188,18 +176,13 @@ pub fn dispatch(
             let course = parse_course(params)?;
             let unit = parse_unit(params)?;
             let checkpoint = params.get("checkpoint").filter(|value| !value.is_null());
-            let options = params
-                .get("options")
-                .cloned()
-                .unwrap_or_else(|| json!({}));
+            let options = params.get("options").cloned().unwrap_or_else(|| json!({}));
             if !options.is_object() {
                 return Err(ModuleError::invalid_params("参数 options 必须是 JSON 对象"));
             }
             api.study_step(host, session, &course, &unit, checkpoint, &options)
         }
-        other => Err(ModuleError::unsupported(format!(
-            "方法 {other} 尚未在本模块 v1 草案中实现；已实现：platform.describe、auth.begin/poll/complete/verify、catalog.courses/units、study.step"
-        ))),
+        other => api.extension(host, other, params),
     }
 }
 

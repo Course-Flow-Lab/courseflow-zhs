@@ -6,7 +6,7 @@
 //! completes on the first step. The function is pure: replaying the same checkpoint
 //! returns the same next state, which makes it safe to re-invoke after a restart.
 
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 
 use crate::error::ModuleError;
 

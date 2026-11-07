@@ -11,7 +11,7 @@
 
 use std::{collections::HashMap, sync::Mutex};
 
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 
 use crate::error::ModuleError;
 use crate::host::{FetchRequest, Host};

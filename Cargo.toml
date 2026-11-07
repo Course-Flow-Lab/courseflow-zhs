@@ -1,20 +1,20 @@
 [package]
 name = "courseflow-zhs"
-version = "0.2.2"
-edition = "2021"
-rust-version = "1.85"
+version = "0.3.0"
+edition = "2024"
+rust-version = "1.88"
 publish = false
 
 [dependencies]
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-# Protocol crypto only: the 智慧树 bootstrap handshake (RSA PKCS#1 v1.5) and
-# AES-128-CBC request signing. No HTTP stack: every request goes through cw.net.fetch.
+# 仅用于平台协议的 RSA 握手和 AES-CBC 签名；所有 HTTP 经 cw.net.fetch。
 rsa = "0.9"
 aes = "0.8"
 cbc = { version = "0.1", features = ["alloc"] }
 base64 = "0.22"
 rand = "0.8"
+scraper = "0.29"
 
 [profile.release]
 strip = true
