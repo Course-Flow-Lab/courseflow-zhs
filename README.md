@@ -36,9 +36,14 @@ cargo +stable test --locked
 cargo +stable build --release --locked
 ```
 
-清单入口为 `target/release/courseflow-zhs`。框架目录中安装：
+清单入口为 `target/release/courseflow-zhs`。安装前先取得框架；已经有本地检出时跳过第一步：
 
 ```sh
+# 1. 取得框架（已有检出可跳过 clone）
+git clone https://github.com/Course-Flow-Lab/courseflow-framework.git ../courseflow-framework
+(cd ../courseflow-framework && npm ci)
+
+# 2. 在 courseflow-framework 中安装本模块
 npm run cli -- module add ../courseflow-zhs
 npm run cli -- module config zhs '{"source":"live"}'
 ```
