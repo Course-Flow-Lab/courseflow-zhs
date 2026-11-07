@@ -1,7 +1,7 @@
 //! Live 智慧树 protocol.
 //!
-//! Everything here is a port of the reference implementation in `courseweave/src/zhs*` onto the
-//! module API: the RSA/AES key exchange (`crypto.rs`), signed `secretStr` gateway calls, the
+//! 在线协议通过模块 API 实现，包括 RSA/AES 密钥交换（`crypto.rs`）、
+//! `secretStr` 网关签名、
 //! Passport SSO exchange, the shared-course outline with server-reported progress, and the
 //! `prelearningNote` / `saveDatabaseIntervalTimeV2` study writes.
 //!

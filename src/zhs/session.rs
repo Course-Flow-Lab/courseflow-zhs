@@ -124,8 +124,7 @@ pub fn poll_fixture(store: &ChallengeStore, challenge: &str, now: i64) -> Value 
     json!({ "state": store.fixture_poll(challenge, now) })
 }
 
-/// Passport SSO exchange for a confirmed QR, then a profile read. Mirrors
-/// `ZhsClient::finish_login` / `verify` in `courseweave/src/zhs.rs`.
+/// 完成已确认二维码的 SSO 交换，再读取平台身份。
 pub fn complete_live(
     host: &dyn Host,
     store: &ChallengeStore,
@@ -164,7 +163,7 @@ pub fn verify_fixture() -> Value {
 // --- live -------------------------------------------------------------------------
 
 /// GET the Passport login page (so its cookie jar is initialised), then GET the QR
-/// image. Mirrors `ZhsClient::qr_code` in `courseweave/src/zhs.rs`.
+/// image. The host fetches the official QR image without exposing credentials.
 pub fn begin_live(
     host: &dyn Host,
     store: &ChallengeStore,

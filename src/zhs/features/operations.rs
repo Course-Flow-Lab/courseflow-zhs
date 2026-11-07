@@ -603,7 +603,13 @@ fn meeting_step(client: &FeatureClient, course: &catalog::Course, params: &Value
         cp = json!({});
     }
     if cp["execution_id"] != params["options"]["execution_id"] {
-        for field in ["page", "snapshot", "idle_since", "auth_wait_since"] {
+        for field in [
+            "page",
+            "snapshot",
+            "idle_since",
+            "auth_wait_since",
+            "loading_since",
+        ] {
             cp.as_object_mut().expect("对象").remove(field);
         }
         cp["execution_id"] = params["options"]["execution_id"].clone();
@@ -650,11 +656,36 @@ fn meeting_step(client: &FeatureClient, course: &catalog::Course, params: &Value
         );
     }
     cp.as_object_mut().expect("对象").remove("auth_wait_since");
+    let diagnostic = json!({"phase":snapshot["phase"],"readiness":snapshot["readiness"],"media":snapshot["media"]});
     if snapshot["blocked"].is_string() {
-        return Ok(json!({"status":"needs_human","reason":snapshot["blocked"],"checkpoint":cp}));
+        return Ok(
+            json!({"status":"needs_human","reason":snapshot["blocked"],"checkpoint":cp,"diagnostic":diagnostic}),
+        );
     }
+    if snapshot["loading"] == true {
+        let since = number(&cp["loading_since"]).unwrap_or(now);
+        cp["loading_since"] = json!(since);
+        cp["snapshot"] = snapshot.clone();
+        cp.as_object_mut().expect("对象").remove("idle_since");
+        let phase = match snapshot["phase"].as_str().unwrap_or("") {
+            "history" => "观看历史接口",
+            "videos" => "视频目录",
+            "timeline" => "视频时间轴",
+            "authorization" => "回放权限信息",
+            "player" => "官方播放器脚本",
+            "media" => "视频元素",
+            _ => "官方回放页面",
+        };
+        return Ok(if now - since >= 60 {
+            json!({"status":"needs_human","reason":format!("官方回放初始化超时：仍在等待{phase}，请查看日志后重试"),"checkpoint":cp,"diagnostic":diagnostic})
+        } else {
+            json!({"status":"in_progress","detail":format!("正在加载{phase}"),"checkpoint":cp,"wait_ms":1000,"diagnostic":diagnostic})
+        });
+    }
+    cp.as_object_mut().expect("对象").remove("loading_since");
     let previous = cp["snapshot"].clone();
-    let unchanged = previous == snapshot;
+    let unchanged =
+        previous["key"] == snapshot["key"] && previous["position"] == snapshot["position"];
     cp["idle_since"] = if unchanged {
         cp["idle_since"].clone()
     } else {
@@ -663,11 +694,11 @@ fn meeting_step(client: &FeatureClient, course: &catalog::Course, params: &Value
     cp["snapshot"] = snapshot.clone();
     if number(&cp["idle_since"]).is_some_and(|s| now - s >= 180) {
         return Ok(
-            json!({"status":"blocked","reason":"播放器连续三分钟未推进，请在官方页面核对","checkpoint":cp}),
+            json!({"status":"needs_human","reason":"播放器连续三分钟未推进，任务已暂停；请导出日志核对媒体状态后继续","checkpoint":cp,"diagnostic":diagnostic}),
         );
     }
     Ok(
-        json!({"status":"in_progress","detail":if snapshot["loading"]==true { "正在加载官方回放和观看历史".into() } else { format!("官方回放 · 签到进度 {}",text(&snapshot["percent"])) },"progress":{"percent":snapshot["percent"]},"wait_ms":5000,"checkpoint":cp}),
+        json!({"status":"in_progress","detail":format!("官方回放 · 签到进度 {}",text(&snapshot["percent"])) ,"progress":{"percent":snapshot["percent"]},"wait_ms":5000,"checkpoint":cp,"diagnostic":diagnostic}),
     )
 }
 

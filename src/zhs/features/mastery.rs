@@ -1,4 +1,4 @@
-// 协议适配自 Courseweave（MIT），凭据和 HTTP 访问改由 Courseflow 宿主提供。
+// 协议实现遵循 MIT 许可，凭据和 HTTP 访问改由 Courseflow 宿主提供。
 use super::*;
 impl FeatureClient<'_> {
     pub fn mastery_papers(&self, course: &providers::Course) -> Result<Vec<Paper>> {
