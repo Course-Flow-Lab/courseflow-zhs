@@ -1,7 +1,7 @@
 (() => {
-  if (/^(passport|login)\./.test(location.hostname)) return { blocked: '平台登录已过期，请重新扫码' };
+  if (/^(passport|login)\./.test(location.hostname)) return { auth_redirect: true };
   const observed = window.__courseflowObserved || {};
-  for (const response of Object.values(observed)) if (response.error) return { blocked: response.error };
+  for (const response of Object.values(observed)) if (response.error) return response.code === 'platform_login_expired' ? { authentication_required: true } : { blocked: response.error };
   if (!observed['/getWatchHistory']?.loaded) return { loading: true };
   if (!window.videoFlag || !window.videoInfo?.length || window.courseEndStatus === null || !window.videoStartEndmap?.size?.()) return { loading: true };
   if (!window.__courseflowStarted) {

@@ -2,10 +2,10 @@
   "schemaVersion": 1,
   "id": "zhs",
   "name": "智慧树",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "moduleApi": 1,
   "engines": {
-    "framework": ">=0.1.1 <0.2.0"
+    "framework": ">=0.1.2 <0.2.0"
   },
   "runtime": {
     "engine": "binary",

@@ -26,6 +26,8 @@ struct MockHost {
     fetches: Mutex<Vec<FetchRequest>>,
     state: Mutex<HashMap<(String, String), Value>>,
     logs: Mutex<Vec<(String, String)>>,
+    browser_snapshot: Mutex<Value>,
+    browser_calls: Mutex<Vec<String>>,
 }
 
 impl MockHost {
@@ -49,6 +51,15 @@ impl MockHost {
 }
 
 impl Host for MockHost {
+    fn service(&self, method: &str, _params: Value) -> Result<Value, ModuleError> {
+        self.browser_calls.lock().unwrap().push(method.to_owned());
+        match method {
+            "cw.browser.open" => Ok(json!({"page":"official-page"})),
+            "cw.browser.evaluate" => Ok(self.browser_snapshot.lock().unwrap().clone()),
+            _ => Err(ModuleError::unsupported(method)),
+        }
+    }
+
     fn fetch(&self, request: &FetchRequest) -> Result<FetchResponse, ModuleError> {
         self.fetches.lock().unwrap().push(request.clone());
         self.responses
@@ -761,4 +772,74 @@ fn popup_normalization_keeps_images_and_unknown_types_require_manual_handling() 
         normalize_popup(&json!({"eid":"q2","questionType":999,"name":"未知题型"})).unwrap();
     assert_eq!(unsupported.kind, "unsupported");
     assert!(!validate_answer(&unsupported, &["猜测".into()]));
+}
+
+fn meeting_context(host: &MockHost) -> Value {
+    let course = fixture_course(&fixture(), host);
+    let key = format!(
+        "{}/{}/meetings",
+        course["id"].as_str().unwrap(),
+        course["recruit_id"].as_str().unwrap()
+    );
+    host.state_set("features", &key, &json!([{"liveCourseId":"meeting","taskType":1,"taskStatus":3,"replayCourseUrl":"https://lc.zhihuishu.com/live/vod_room.html?id=synthetic"}]), "s_test").unwrap();
+    json!({"session":"s_test","course":course,"operation":"meeting","item_id":"meeting","checkpoint":null,"options":{"execution_id":"run"}})
+}
+fn meeting_reply(host: &MockHost, completed: bool) {
+    host.respond(FetchResponse {
+        status: 200,
+        headers: Default::default(),
+        body: format!(
+            "courseflow({});",
+            json!({"signInStatus":if completed {2} else {1},"courseEndStatus":1,"openStatus":2})
+        ),
+    });
+}
+#[test]
+fn meeting_waits_for_sso_then_requires_platform_attendance_confirmation() {
+    let api = live();
+    let host = MockHost::at(1000);
+    let mut params = meeting_context(&host);
+    *host.browser_snapshot.lock().unwrap() = json!({"auth_redirect":true});
+    meeting_reply(&host, false);
+    let pending = call(&api, &host, "activity.step", params.clone()).unwrap();
+    assert_eq!(pending["status"], "in_progress");
+    assert!(pending["detail"].as_str().unwrap().contains("登录态"));
+    params["checkpoint"] = pending["checkpoint"].clone();
+    host.now.store(1005, Ordering::SeqCst);
+    *host.browser_snapshot.lock().unwrap() = json!({"key":"video","position":5,"percent":"10%"});
+    meeting_reply(&host, false);
+    let playing = call(&api, &host, "activity.step", params.clone()).unwrap();
+    assert_eq!(playing["status"], "in_progress");
+    assert!(playing["checkpoint"]["auth_wait_since"].is_null());
+    params["checkpoint"] = playing["checkpoint"].clone();
+    meeting_reply(&host, true);
+    assert_eq!(
+        call(&api, &host, "activity.step", params).unwrap()["status"],
+        "completed"
+    );
+    assert_eq!(
+        host.browser_calls
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|m| m.as_str() == "cw.browser.open")
+            .count(),
+        1
+    );
+}
+#[test]
+fn meeting_persistent_login_redirect_is_typed_expiry_instead_of_a_skipped_activity() {
+    let api = live();
+    let host = MockHost::at(1000);
+    let mut params = meeting_context(&host);
+    *host.browser_snapshot.lock().unwrap() = json!({"auth_redirect":true});
+    meeting_reply(&host, false);
+    let pending = call(&api, &host, "activity.step", params.clone()).unwrap();
+    params["checkpoint"] = pending["checkpoint"].clone();
+    host.now.store(1031, Ordering::SeqCst);
+    meeting_reply(&host, false);
+    assert_eq!(
+        expect_error(call(&api, &host, "activity.step", params)).code,
+        "platform_login_expired"
+    );
 }
