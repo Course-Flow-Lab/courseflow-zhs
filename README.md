@@ -4,6 +4,28 @@
 
 平台协议和官方页面脚本在本仓库；HTTP 凭据、Cookie 容器、持久化加密、模型密钥、浏览器进程和任务调度由框架管理。Studia 只供开发时对照，不在运行时导入或启动。
 
+## 模块定义
+
+框架侧对模块清单、宿主服务和生命周期的通用说明见框架 README 的「模块系统」；这里只列智慧树特有的取值。
+
+| 项 | 值 |
+| --- | --- |
+| 模块 id／平台 id | `zhs` |
+| 名称 | 智慧树 |
+| 版本／`moduleApi` | 0.3.0／1 |
+| 框架范围 | `engines.framework`: `>=0.1.1 <0.2.0` |
+| 运行形态 | `runtime.engine`: `binary`，入口 `target/release/courseflow-zhs` |
+| 登录方式 | `qr`（扫码） |
+| 声明操作 | `study`、`answer`、`review`、`meeting`、`mastery`、`qa`、`ask`、`trial` |
+| 单元类型 | `video`、`document` |
+| 最高倍速 | `max_speed`: 1.5 |
+| 登录保活 | `keepalive_seconds`: 300，框架定期调用 `auth.keepalive` |
+| 配置项 | `source`：`live`（默认，真实平台）或 `fixture`（离线记录） |
+| 网络许可 | `zhihuishu.com`、`*.zhihuishu.com` |
+| 其他权限 | `browser: true`（官方页面与播放器）、`ai: true`（模型生成由宿主执行） |
+| 使用的宿主服务 | `cw.net.fetch`、`cw.state`、`cw.session.identity`、`cw.ai.generate`、`cw.browser.*`、`cw.peers.*`、`cw.clock.now`、`cw.log` |
+| 清单文件 | [`courseflow.module.json`](courseflow.module.json) |
+
 ## 功能
 
 | 类别 | 已实现的行为 |
@@ -23,7 +45,7 @@
 | 成绩分析 | 计分规则、成绩、学习习惯分、课程互动分和问答统计 |
 | 框架集成 | 人工补答、题图认证代理、个人／共享模型、答案记忆、Markdown／Word／JSON／CSV 导出 |
 
-以上为实现范围，并不代表已在本次会话用真实账号逐项验收。测试使用模拟宿主和显式 fixture，不会向真实平台保存学习进度、交卷、签到或发布内容。
+以上为实现范围，并不代表已在本次会话用真实账号逐项验收。逐项迁移与验收对照见[功能对照](docs/PARITY.md)。测试使用模拟宿主和显式 fixture，不会向真实平台保存学习进度、交卷、签到或发布内容。
 
 当前平台题型适配单选（含类型 14）、多选和填空；宿主支持通用人工补答表单，但未知平台题型仍提示在官方页面完成。共享课已提交考试没有已确认的只读接口，使用原任务的本地报告导出，不重新开考。
 
