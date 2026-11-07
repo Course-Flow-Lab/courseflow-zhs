@@ -1,0 +1,60 @@
+{
+  "recorded_at": "2025-11-06T09:14:10Z",
+  "source": "studyservice-api.zhihuishu.com · learning/videolist + learning/queryStuyInfo (recorded, normalized for the v1 fixture)",
+  "course_id": "1000123456",
+  "recruit_id": "2000987654",
+  "name": "大学生心理健康教育",
+  "chapters": [
+    {
+      "id": "5001",
+      "name": "第一章 心理健康概述",
+      "lessons": [
+        {
+          "id": "6001",
+          "name": "1.1 什么是心理健康",
+          "units": [
+            {
+              "id": "9001",
+              "name": "1.1 什么是心理健康",
+              "kind": "video",
+              "duration_seconds": 480,
+              "watched_seconds": 312,
+              "state": "in_progress",
+              "video_id": "v1001"
+            },
+            {
+              "id": "9002",
+              "name": "1.2 常见心理困扰",
+              "kind": "video",
+              "duration_seconds": 600,
+              "watched_seconds": 600,
+              "state": "completed",
+              "video_id": "v1002"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "5002",
+      "name": "第二章 自我认知与成长",
+      "lessons": [
+        {
+          "id": "6002",
+          "name": "2.1 自我探索阅读",
+          "units": [
+            {
+              "id": "9003",
+              "name": "2.1 自我探索阅读",
+              "kind": "document",
+              "duration_seconds": 0,
+              "watched_seconds": 0,
+              "state": "not_started",
+              "video_id": null
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

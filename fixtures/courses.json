@@ -1,0 +1,35 @@
+{
+  "recorded_at": "2025-11-06T09:12:44Z",
+  "source": "onlineservice-api.zhihuishu.com · queryShareCourseInfo + queryStudentAICourseList (recorded snapshot)",
+  "shared": {
+    "code": 200,
+    "message": "success",
+    "result": {
+      "totalCount": 1,
+      "courseOpenDtos": [
+        {
+          "courseId": 1000123456,
+          "recruitId": 2000987654,
+          "courseName": "大学生心理健康教育",
+          "studyPercent": 37.5,
+          "secret": "djEwMDAxMjM0NTYtc2hhcmVkLWRlbW8tZW50cnk",
+          "courseType": 1,
+          "schoolName": "示例大学"
+        }
+      ]
+    }
+  },
+  "smart": {
+    "code": 0,
+    "success": true,
+    "rt": [
+      {
+        "courseId": 3000112233,
+        "classId": 4000445566,
+        "courseName": "人工智能导论（智慧课程）",
+        "schedule": 12.0,
+        "teacherName": "示例教师"
+      }
+    ]
+  }
+}

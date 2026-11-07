@@ -1,0 +1,35 @@
+{
+  "schemaVersion": 1,
+  "id": "zhs",
+  "name": "智慧树",
+  "version": "0.2.2",
+  "moduleApi": 1,
+  "engines": { "framework": ">=0.1.0-0 <0.2.0" },
+  "runtime": {
+    "engine": "binary",
+    "entry": "target/release/courseflow-zhs"
+  },
+  "platform": {
+    "id": "zhs",
+    "name": "智慧树",
+    "short": "智慧树",
+    "login": ["qr"],
+    "operations": ["study", "answer", "review", "meeting", "mastery", "qa", "ask"],
+    "unit_kinds": ["video", "document"],
+    "max_speed": 1.5,
+    "presentation": {
+      "tabs": [
+        { "id": "qa", "label": "问答区", "when": { "course.kind": "shared" } }
+      ],
+      "actions": [
+        { "id": "trial", "label": "短时试跑", "when": { "course.family": "shared" } }
+      ]
+    }
+  },
+  "permissions": {
+    "network": ["zhihuishu.com", "*.zhihuishu.com"],
+    "browser": false,
+    "ai": true,
+    "storage": "module"
+  }
+}
