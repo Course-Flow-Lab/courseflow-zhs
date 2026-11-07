@@ -1,8 +1,8 @@
 //! Real 智慧树 hosts and paths, as constants.
 //!
 //! Every request below is issued by the framework through `cw.net.fetch`; the module
-//! itself never resolves a hostname. The reference implementation is
-//! `courseweave/src/zhs.rs` (and `zhs/outline.rs`, `zhs/study.rs`, `zhs/features.rs`).
+//! itself never resolves a hostname. Endpoint groups cover authentication, course outlines,
+//! study progress and course activities.
 
 // --- Passport (QR login) ---------------------------------------------------------
 pub const PASSPORT_BASE: &str = "https://passport.zhihuishu.com";

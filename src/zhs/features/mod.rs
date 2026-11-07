@@ -1,5 +1,5 @@
 //! 智慧课程、作业考试、掌握度和课程活动的宿主适配。
-//! 协议参考 Courseweave（MIT）；HTTP、账号凭据、模型和浏览器仍由框架管理。
+//! 使用 MIT 授权的协议实现；HTTP、账号凭据、模型和浏览器仍由框架管理。
 use super::{crypto, live, number};
 use crate::{
     error::ModuleError,

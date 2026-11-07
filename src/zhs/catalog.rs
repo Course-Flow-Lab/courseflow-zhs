@@ -231,10 +231,8 @@ fn unit(
 
 /// One real `queryShareCourseInfo` POST through `cw.net.fetch`.
 ///
-/// Note: the reference client signs the form body with a per-module AES key obtained
-/// by RSA (`shared_courses` in `courseweave/src/zhs.rs`). This draft has no crypto
-/// dependency, so it sends the documented JSON `fromurl` payload unsigned; see the
-/// README port checklist. Any framework error code is propagated verbatim.
+/// 共享课在线目录由平台协议层构建签名请求，经宿主发送。
+/// 此处保留公共课程类型与离线样例辅助方法。
 
 // --- helpers ----------------------------------------------------------------------
 

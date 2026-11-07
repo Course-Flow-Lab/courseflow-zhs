@@ -843,3 +843,48 @@ fn meeting_persistent_login_redirect_is_typed_expiry_instead_of_a_skipped_activi
         "platform_login_expired"
     );
 }
+
+#[test]
+fn meeting_loading_timeout_is_distinct_from_playback_stall_and_preserves_retry() {
+    let api = live();
+    let host = MockHost::at(1000);
+    let mut params = meeting_context(&host);
+    *host.browser_snapshot.lock().unwrap() =
+        json!({"loading":true,"phase":"history","readiness":{"history":false}});
+    meeting_reply(&host, false);
+    let loading = call(&api, &host, "activity.step", params.clone()).unwrap();
+    assert!(loading["detail"].as_str().unwrap().contains("观看历史接口"));
+    params["checkpoint"] = loading["checkpoint"].clone();
+    host.now.store(1061, Ordering::SeqCst);
+    meeting_reply(&host, false);
+    let paused = call(&api, &host, "activity.step", params.clone()).unwrap();
+    assert_eq!(paused["status"], "needs_human");
+    assert!(paused["reason"].as_str().unwrap().contains("初始化超时"));
+    assert_eq!(paused["diagnostic"]["phase"], "history");
+    params["checkpoint"] = paused["checkpoint"].clone();
+    params["options"]["execution_id"] = json!("retry");
+    meeting_reply(&host, false);
+    let retry = call(&api, &host, "activity.step", params).unwrap();
+    assert_eq!(retry["status"], "in_progress");
+    assert_eq!(retry["checkpoint"]["loading_since"], 1061);
+}
+
+#[test]
+fn meeting_requires_actual_time_progress_even_when_player_flags_change() {
+    let api = live();
+    let host = MockHost::at(1000);
+    let mut params = meeting_context(&host);
+    *host.browser_snapshot.lock().unwrap() =
+        json!({"key":"video","position":12,"percent":"10%","media":{"paused":false}});
+    meeting_reply(&host, false);
+    let playing = call(&api, &host, "activity.step", params.clone()).unwrap();
+    params["checkpoint"] = playing["checkpoint"].clone();
+    host.now.store(1181, Ordering::SeqCst);
+    *host.browser_snapshot.lock().unwrap() =
+        json!({"key":"video","position":12,"percent":"11%","media":{"paused":true}});
+    meeting_reply(&host, false);
+    let paused = call(&api, &host, "activity.step", params).unwrap();
+    assert_eq!(paused["status"], "needs_human");
+    assert!(paused["reason"].as_str().unwrap().contains("三分钟"));
+    assert_eq!(paused["diagnostic"]["media"]["paused"], true);
+}
