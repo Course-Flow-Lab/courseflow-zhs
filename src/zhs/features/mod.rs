@@ -11,6 +11,7 @@ mod assessment;
 mod mastery;
 pub mod operations;
 mod questions;
+mod scores;
 mod smart;
 pub mod types;
 use questions::{knowledge_points, merge_existing, parse_question, remote_id};

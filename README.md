@@ -1,6 +1,6 @@
 # Courseflow 智慧树模块
 
-`courseflow-zhs` 是智慧树平台的独立 Rust 模块，通过 stdin／stdout 的 NDJSON JSON-RPC 接入 [Courseflow 框架](https://github.com/Course-Flow-Lab/courseflow-framework)。模块 API 为 1，当前模块版本为 0.3.2，需要框架 `>=0.1.3 <0.2.0`。
+`courseflow-zhs` 是智慧树平台的独立 Rust 模块，通过 stdin／stdout 的 NDJSON JSON-RPC 接入 [Courseflow 框架](https://github.com/Course-Flow-Lab/courseflow-framework)。模块 API 为 1，当前模块版本为 0.3.3，需要框架 `>=0.1.6 <0.2.0`。
 
 平台协议和官方页面脚本在本仓库；HTTP 凭据、Cookie 容器、持久化加密、模型密钥、浏览器进程和任务调度由框架管理。模块独立运行，不导入或启动其他平台工程。
 
@@ -12,8 +12,8 @@
 | --- | --- |
 | 模块 id／平台 id | `zhs` |
 | 名称 | 智慧树 |
-| 版本／`moduleApi` | 0.3.2／1 |
-| 框架范围 | `engines.framework`: `>=0.1.3 <0.2.0` |
+| 版本／`moduleApi` | 0.3.3／1 |
+| 框架范围 | `engines.framework`: `>=0.1.6 <0.2.0` |
 | 运行形态 | `runtime.engine`: `binary`，入口 `target/release/courseflow-zhs` |
 | 登录方式 | `qr`（扫码） |
 | 声明操作 | `study`、`answer`、`review`、`meeting`、`mastery`、`qa`、`ask`、`trial` |
@@ -144,3 +144,13 @@ Cargo 测试包含清单一致性、扫码样例、公共字段、学习检查�
 ## 许可证与来源
 
 部分作业考试、掌握度、资源及页面协议使用 MIT 授权实现，版权与授权条件见 [LICENSE](LICENSE)。第三方许可证原文保留，以便正确保留版权及授权条件；项目说明文档使用简体中文。
+
+## 超额问答、分区成绩与统一题库
+
+0.3.3 由框架用户偏好控制超额问答，默认关闭。开启后每批最多 50 条提问或回答，仍逐条间隔一分钟、保留发布意图和平台编号；遇平台拒绝、验证码或未知发布结果会暂停。超过默认 10／20 条的计分目标可能不再计分、触发平台限制或增加模型费用。当前开关关闭后，后续步骤恢复默认日上限。
+
+成绩通过 `platform.score_sections` 声明四个区域，`catalog.score` 的 `part` 可分别请求成绩、习惯、互动和规则。完整请求仍返回原始结构，供问答统计及导出使用。缺失值不冒充零分。
+
+作答回读确认后，平台判对或公开的标准答案通过 `cw.question_bank.confirm` 写入框架内置题库；模块不保存模型密钥，也不会把模型候选当作正确答案。只有交卷成功而没有正确答案依据时不会入库。
+
+以上新增流程使用离线宿主与合成数据验证，没有使用真实账号发布或交卷。
