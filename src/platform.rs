@@ -29,6 +29,8 @@ pub struct PlatformDescriptor {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub keepalive_seconds: Option<u64>,
     pub presentation: Presentation,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub score_sections: Vec<PresentationItem>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]

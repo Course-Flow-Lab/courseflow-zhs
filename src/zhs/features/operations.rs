@@ -187,7 +187,7 @@ fn course_private(c: &catalog::Course) -> providers::Course {
         native: Value::Null,
     }
 }
-fn request(client: &FeatureClient, path: &str, payload: Value) -> Result<Value> {
+pub(super) fn request(client: &FeatureClient, path: &str, payload: Value) -> Result<Value> {
     let mut r = FetchRequest::post_json(
         client.session,
         format!("https://stuonline.zhihuishu.com/stuonline/json/stuLearnReportNew/{path}"),
@@ -419,6 +419,13 @@ pub fn dispatch(zhs: &Zhs, host: &dyn Host, method: &str, params: &Value) -> Res
                     }
                 }
             }
+            if confirmed {
+                for question in &attempt.questions {
+                    if let Some(answer) = graded.get(&question.id) {
+                        confirm_answer(host, session, &course, question, answer, &attempt.id);
+                    }
+                }
+            }
             Ok(
                 json!({"confirmed":confirmed,"attempt_id":attempt.id,"graded_answers":graded,"score":score,"review":review.map(|a|public(&a)).transpose()?}),
             )
@@ -444,18 +451,7 @@ pub fn dispatch(zhs: &Zhs, host: &dyn Host, method: &str, params: &Value) -> Res
                 json!({"ready":attempt.native["partial"]!=true,"cursor":attempt.native["cursor"],"attempt":public(&attempt)?}),
             )
         }
-        "catalog.score" => {
-            let payload = json!({"courseId":course.id,"recruitId":course.recruit_id,"type":"l","courseTypeEs":1});
-            let rule = request(&client, "loadStuLearingTab/", payload.clone())?;
-            let mut scores = payload.clone();
-            scores["stuRankType"] = json!("classRank");
-            let earned = request(&client, "loadStuLearnReport/", scores)?;
-            let habit = request(&client, "loadStuHabit/", payload.clone())?;
-            let qa = request(&client, "loadCourseForum/", payload)?;
-            Ok(
-                json!({"rules":rule["scoreAssessRuleDto"],"scores":earned["ssd"],"habit":habit["learnedHabitScore"],"interactive":qa["learnedInteractiveScore"],"qa":qa["qaStatisticsMap"]["myInteractionDto"]}),
-            )
-        }
+        "catalog.score" => super::scores::load(&client, &course, params["part"].as_str()),
         "catalog.meetings" => meetings(&client, &course),
         "qa.board" => qa_board(&client, &course, params),
         "qa.posts" => {
@@ -764,6 +760,7 @@ fn qa_step(client: &FeatureClient, course: &catalog::Course, params: &Value) -> 
     }
     let ask = params["operation"] == "ask";
     let options = &params["options"];
+    let over_limit = options["allow_over_limit"] == true;
     let mut cp = params["checkpoint"].clone();
     if !cp.is_object() {
         cp = json!({});
@@ -792,8 +789,12 @@ fn qa_step(client: &FeatureClient, course: &catalog::Course, params: &Value) -> 
         if ask {
             let texts = options["texts"]
                 .as_array()
-                .filter(|t| !t.is_empty() && t.len() <= 10)
-                .ok_or_else(|| ModuleError::invalid_params("请先检查并选择 1–10 个提问草稿"))?;
+                .filter(|t| !t.is_empty() && t.len() <= if over_limit { 50 } else { 10 })
+                .ok_or_else(|| {
+                    ModuleError::invalid_params(
+                        "请先检查提问草稿；默认最多 10 条，超额模式最多 50 条",
+                    )
+                })?;
             if texts.iter().any(|t| {
                 t.as_str()
                     .is_none_or(|s| !(10..=1000).contains(&s.chars().count()))
@@ -817,8 +818,11 @@ fn qa_step(client: &FeatureClient, course: &catalog::Course, params: &Value) -> 
                     json!({"status":"in_progress","wait_ms":1000,"checkpoint":cp,"detail":"正在加载官方问答区"}),
                 );
             }
-            let max = options["max_answers"].as_i64().unwrap_or(1).clamp(0, 10);
-            let limit = options["limit"].as_u64().unwrap_or(10).clamp(1, 20) as usize;
+            let max = options["max_answers"].as_i64().unwrap_or(1).clamp(0, 100);
+            let limit = options["limit"]
+                .as_u64()
+                .unwrap_or(10)
+                .clamp(1, if over_limit { 50 } else { 20 }) as usize;
             let mut candidates = cp["candidates"].as_array().cloned().unwrap_or_default();
             let rows = board["posts"].as_array().cloned().unwrap_or_default();
             for q in &rows {
@@ -898,18 +902,21 @@ fn qa_step(client: &FeatureClient, course: &catalog::Course, params: &Value) -> 
     let day = (now + 28800).div_euclid(86400) * 86400 - 28800;
     let kind = if ask { "question" } else { "answer" };
     let cap = if ask { 10 } else { 20 };
-    if posts
-        .iter()
-        .filter(|p| {
-            p["course_id"] == course.id
-                && p["recruit_id"] == course.recruit_id
-                && p["kind"] == kind
-                && number(&p["created_at"]).is_some_and(|t| t >= day)
-        })
-        .count()
-        >= cap
+    if !over_limit
+        && posts
+            .iter()
+            .filter(|p| {
+                p["course_id"] == course.id
+                    && p["recruit_id"] == course.recruit_id
+                    && p["kind"] == kind
+                    && number(&p["created_at"]).is_some_and(|t| t >= day)
+            })
+            .count()
+            >= cap
     {
-        return Err(ModuleError::rejected("今日发布数量已达到限额"));
+        return Err(ModuleError::rejected(
+            "今日发布数量已达到默认限额；可在问答区了解超额模式的潜在风险",
+        ));
     }
     let intent = format!(
         "intent/{}/{}/{}",
@@ -969,6 +976,23 @@ fn qa_step(client: &FeatureClient, course: &catalog::Course, params: &Value) -> 
     )
 }
 
+fn confirm_answer(
+    host: &dyn Host,
+    session: &str,
+    course: &catalog::Course,
+    question: &Question,
+    answer: &[String],
+    reference: &str,
+) {
+    if !types::validate_answer(question, answer) {
+        return;
+    }
+    let dto = json!({"id":question.id,"text":question.text,"kind":question.kind,"options":question.options,"images":question.images,"blanks":question.blanks});
+    if let Err(error)=host.service("cw.question_bank.confirm",json!({"session":session,"course":format!("{}/{}",course.id,course.recruit_id),"question":dto,"answer":answer,"confirmation":{"confirmed":true,"source":"platform","reference":reference}})) {
+        host.log("warn","平台答案已确认，但未能写入内置题库",json!({"code":error.code}));
+    }
+}
+
 fn fixture(
     host: &dyn Host,
     session: &str,
@@ -998,9 +1022,13 @@ fn fixture(
         "catalog.meetings" => Ok(
             json!({"meetings":[{"id":"fixture-meeting","name":"离线见面课","replay_available":true}]}),
         ),
-        "catalog.score" => Ok(
-            json!({"rules":{"habit":10,"interactive":10},"scores":{"totalScore":42},"habit":2,"interactive":3,"qa":{"validQuestionAmount":3,"validAnswerAmount":8,"getAnswer":12}}),
-        ),
+        "catalog.score" => {
+            let data = json!({"rules":{"progressScoreShare":40,"learnedHabitScoreShare":10,"learnedInteractiveScoreShare":10,"examScoreShare":20,"finalExamScoreShare":20},"scores":{"totalScore":42,"courseScore":25,"usualScore":30,"examScore":12,"meetScore":5,"finalScore":0},"habit":2,"interactive":3,"qa":{"validQuestionAmount":3,"validAnswerAmount":8,"getAnswer":12}});
+            match p["part"].as_str() {
+                Some(part) => super::scores::section(part, data),
+                None => Ok(data),
+            }
+        }
         "qa.board" => Ok(
             json!({"ready":true,"posts":[{"id":"fixture-question","content":"如何理解课程中的基本概念？","answers":0,"mine":false}]}),
         ),

@@ -2,10 +2,10 @@
   "schemaVersion": 1,
   "id": "zhs",
   "name": "智慧树",
-  "version": "0.3.2",
+  "version": "0.3.3",
   "moduleApi": 1,
   "engines": {
-    "framework": ">=0.1.3 <0.2.0"
+    "framework": ">=0.1.6 <0.2.0"
   },
   "runtime": {
     "engine": "binary",
@@ -93,7 +93,25 @@
         }
       ]
     },
-    "keepalive_seconds": 300
+    "keepalive_seconds": 300,
+    "score_sections": [
+      {
+        "id": "scores",
+        "label": "成绩概览"
+      },
+      {
+        "id": "habit",
+        "label": "学习习惯"
+      },
+      {
+        "id": "interaction",
+        "label": "问答互动"
+      },
+      {
+        "id": "rules",
+        "label": "考核占比"
+      }
+    ]
   },
   "permissions": {
     "network": [
@@ -102,6 +120,7 @@
     ],
     "browser": true,
     "ai": true,
-    "storage": "module"
+    "storage": "module",
+    "question_bank": true
   }
 }

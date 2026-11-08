@@ -27,6 +27,7 @@ struct MockHost {
     state: Mutex<HashMap<(String, String), Value>>,
     logs: Mutex<Vec<(String, String)>>,
     browser_snapshot: Mutex<Value>,
+    browser_replies: Mutex<VecDeque<Value>>,
     browser_calls: Mutex<Vec<String>>,
 }
 
@@ -55,7 +56,13 @@ impl Host for MockHost {
         self.browser_calls.lock().unwrap().push(method.to_owned());
         match method {
             "cw.browser.open" => Ok(json!({"page":"official-page"})),
-            "cw.browser.evaluate" => Ok(self.browser_snapshot.lock().unwrap().clone()),
+            "cw.browser.evaluate" => Ok(self
+                .browser_replies
+                .lock()
+                .unwrap()
+                .pop_front()
+                .unwrap_or_else(|| self.browser_snapshot.lock().unwrap().clone())),
+            "cw.peers.record" => Ok(json!({})),
             _ => Err(ModuleError::unsupported(method)),
         }
     }
@@ -887,4 +894,59 @@ fn meeting_requires_actual_time_progress_even_when_player_flags_change() {
     assert_eq!(paused["status"], "needs_human");
     assert!(paused["reason"].as_str().unwrap().contains("三分钟"));
     assert_eq!(paused["diagnostic"]["media"]["paused"], true);
+}
+
+#[test]
+fn qa_over_limit_is_explicit_and_still_requires_official_publish_confirmation() {
+    for (operation, kind, cap) in [("ask", "question", 10), ("qa", "answer", 20)] {
+        for allowed in [false, true] {
+            let api = live();
+            let host = MockHost::at(1_800_000_000);
+            let course = json!({"id":"synthetic-course","recruit_id":"synthetic-class","name":"合成课程","kind":"shared","outline_available":true,"progress":null});
+            let posts=(0..cap).map(|i|json!({"course_id":"synthetic-course","recruit_id":"synthetic-class","kind":kind,"content":format!("旧合成内容{i}"),"question_id":format!("old-{i}"),"created_at":1_800_000_000})).collect::<Vec<_>>();
+            host.state
+                .lock()
+                .unwrap()
+                .insert(("qa".into(), "posts".into()), json!(posts));
+            host.browser_replies.lock().unwrap().push_back(json!(true));
+            host.browser_replies.lock().unwrap().push_back(
+                json!({"code":200,"rt":{"questionId":"new-question","answerId":"new-answer"}}),
+            );
+            let cp = json!({"page":"official-page","execution_id":"synthetic-execution","items":[{"id":"new-item","text":"这是一条足够长的合成提问正文","content":"合成讨论题"}],"generated":"这是一条足够长的合成回答正文","index":0});
+            let result = call(
+                &api,
+                &host,
+                "activity.step",
+                json!({"session":"synthetic-session","course":course,"operation":operation,"options":{"execution_id":"synthetic-execution","allow_over_limit":allowed},"checkpoint":cp}),
+            );
+            if allowed {
+                assert_eq!(result.unwrap()["status"], "completed");
+                assert_eq!(
+                    host.state
+                        .lock()
+                        .unwrap()
+                        .get(&("qa".into(), "posts".into()))
+                        .unwrap()
+                        .as_array()
+                        .unwrap()
+                        .len(),
+                    cap + 1
+                );
+            } else {
+                assert!(expect_error(result).message.contains("默认限额"));
+                assert_eq!(
+                    host.state
+                        .lock()
+                        .unwrap()
+                        .get(&("qa".into(), "posts".into()))
+                        .unwrap()
+                        .as_array()
+                        .unwrap()
+                        .len(),
+                    cap
+                );
+            }
+            assert!(host.fetches().is_empty(), "合成问答验证不得发出 HTTP 请求");
+        }
+    }
 }
