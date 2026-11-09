@@ -487,7 +487,7 @@ fn find_paper(
         .ok_or_else(|| ModuleError::not_found("试卷不在当前账号的目录中，请刷新列表"))
 }
 
-fn meetings(client: &FeatureClient, course: &catalog::Course) -> Result<Value> {
+pub(super) fn open_student_portal(client: &FeatureClient, course: &catalog::Course) -> Result<()> {
     crate::zhs::fetch(
         client.host,
         FetchRequest::get(
@@ -498,6 +498,11 @@ fn meetings(client: &FeatureClient, course: &catalog::Course) -> Result<Value> {
             ),
         ),
     )?;
+    Ok(())
+}
+
+fn meetings(client: &FeatureClient, course: &catalog::Course) -> Result<Value> {
+    open_student_portal(client, course)?;
     let mut rows = vec![];
     for page in 0..100 {
         let mut r = FetchRequest::post_json(

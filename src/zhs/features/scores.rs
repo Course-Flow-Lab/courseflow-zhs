@@ -139,6 +139,8 @@ pub(super) fn load(
     course: &catalog::Course,
     part: Option<&str>,
 ) -> Result<Value> {
+    // 成绩站点拥有独立会话，直接访问 JSON 接口可能得到全空的成功响应。
+    super::operations::open_student_portal(client, course)?;
     let payload =
         json!({"courseId":course.id,"recruitId":course.recruit_id,"type":"l","courseTypeEs":1});
     let mut raw = json!({});
@@ -159,6 +161,21 @@ pub(super) fn load(
         let data = request(client, "loadCourseForum/", payload)?;
         raw["interactive"] = data["learnedInteractiveScore"].clone();
         raw["qa"] = data["qaStatisticsMap"]["myInteractionDto"].clone();
+        if value(
+            &raw["qa"],
+            &["validQuestionAmount", "effectiveQuestion", "questions"],
+        )
+        .is_null()
+            && value(
+                &raw["qa"],
+                &["validAnswerAmount", "effectiveAnswer", "answers"],
+            )
+            .is_null()
+        {
+            return Err(ModuleError::unavailable(
+                "平台未返回问答计数，请刷新或重新连接智慧树后重试",
+            ));
+        }
     }
     match part {
         Some(id) => section(id, raw),
