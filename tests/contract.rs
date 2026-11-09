@@ -950,3 +950,49 @@ fn qa_over_limit_is_explicit_and_still_requires_official_publish_confirmation() 
         }
     }
 }
+
+#[test]
+fn score_statistics_initialize_portal_session_before_reading_counts() {
+    for counts in [
+        json!({"validQuestionAmount":0,"validAnswerAmount":"12"}),
+        json!({"validQuestionAmount":null,"validAnswerAmount":null}),
+    ] {
+        let api = live();
+        let host = MockHost::default();
+        host.respond(FetchResponse {
+            status: 200,
+            headers: Default::default(),
+            body: "<html>portal</html>".into(),
+        });
+        host.respond(FetchResponse {
+            status: 200,
+            headers: Default::default(),
+            body:
+                json!({"learnedInteractiveScore":3,"qaStatisticsMap":{"myInteractionDto":counts}})
+                    .to_string(),
+        });
+        let result = call(
+            &api,
+            &host,
+            "catalog.score",
+            json!({"session":"s_test","part":"interaction","course":{"id":"synthetic-course","recruit_id":"synthetic/recruit","name":"模拟课程","kind":"shared","outline_available":true}}),
+        );
+        if counts["validQuestionAmount"].is_null() {
+            assert!(expect_error(result).message.contains("未返回问答计数"));
+        } else {
+            let result = result.unwrap();
+            assert_eq!(result["qa"]["validQuestionAmount"], 0);
+            assert_eq!(result["metrics"][2]["value"], 12.);
+        }
+        let requests = host.fetches();
+        assert_eq!(requests.len(), 2);
+        assert!(
+            requests[0]
+                .url
+                .contains("/teachMeeting/stuListV2?recruitId=synthetic%2Frecruit")
+        );
+        assert_eq!(requests[0].method, "GET");
+        assert!(requests[1].url.ends_with("/loadCourseForum/"));
+        assert!(requests.iter().all(|r| !r.commit));
+    }
+}

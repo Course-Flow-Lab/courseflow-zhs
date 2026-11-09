@@ -1,6 +1,6 @@
 # Courseflow 智慧树模块
 
-`courseflow-zhs` 是智慧树平台的独立 Rust 模块，通过 stdin／stdout 的 NDJSON JSON-RPC 接入 [Courseflow 框架](https://github.com/Course-Flow-Lab/courseflow-framework)。模块 API 为 1，当前模块版本为 0.3.3，需要框架 `>=0.1.6 <0.2.0`。
+`courseflow-zhs` 是智慧树平台的独立 Rust 模块，通过 stdin／stdout 的 NDJSON JSON-RPC 接入 [Courseflow 框架](https://github.com/Course-Flow-Lab/courseflow-framework)。模块 API 为 1，当前模块版本为 0.3.4，需要框架 `>=0.1.6 <0.2.0`。
 
 平台协议和官方页面脚本在本仓库；HTTP 凭据、Cookie 容器、持久化加密、模型密钥、浏览器进程和任务调度由框架管理。模块独立运行，不导入或启动其他平台工程。
 
@@ -12,7 +12,7 @@
 | --- | --- |
 | 模块 id／平台 id | `zhs` |
 | 名称 | 智慧树 |
-| 版本／`moduleApi` | 0.3.3／1 |
+| 版本／`moduleApi` | 0.3.4／1 |
 | 框架范围 | `engines.framework`: `>=0.1.6 <0.2.0` |
 | 运行形态 | `runtime.engine`: `binary`，入口 `target/release/courseflow-zhs` |
 | 登录方式 | `qr`（扫码） |
@@ -154,3 +154,5 @@ Cargo 测试包含清单一致性、扫码样例、公共字段、学习检查�
 作答回读确认后，平台判对或公开的标准答案通过 `cw.question_bank.confirm` 写入框架内置题库；模块不保存模型密钥，也不会把模型候选当作正确答案。只有交卷成功而没有正确答案依据时不会入库。
 
 以上新增流程使用离线宿主与合成数据验证，没有使用真实账号发布或交卷。
+
+0.3.4 修复问答计数和成绩读取前缺少成绩站点会话初始化的问题。若平台仍返回空计数，会明确提示读取失败；真实的零条记录正常显示为 0。验证使用模拟宿主，不发布实际问答。

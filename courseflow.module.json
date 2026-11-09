@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "id": "zhs",
   "name": "智慧树",
-  "version": "0.3.3",
+  "version": "0.3.4",
   "moduleApi": 1,
   "engines": {
     "framework": ">=0.1.6 <0.2.0"

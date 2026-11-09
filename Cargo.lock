@@ -79,7 +79,7 @@ checksum = "c2459377285ad874054d797f3ccebf984978aa39129f6eafde5cdc8315b612f8"
 
 [[package]]
 name = "courseflow-zhs"
-version = "0.3.3"
+version = "0.3.4"
 dependencies = [
  "aes",
  "base64",
