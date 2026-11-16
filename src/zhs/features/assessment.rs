@@ -284,8 +284,31 @@ impl FeatureClient<'_> {
             .map(|q| q.id.clone())
             .collect::<Vec<_>>()
             .join(",");
-        let answers=self.feature_request(&format!("{HOMEWORK}/answer/getStuAnswerInfo"),&json!({"recruitId":remote_id(&course.recruit_id),"stuExamId":remote_id(&student),"examId":remote_id(&exam_id),"schoolId":remote_id(&school),"courseId":remote_id(&course.id),"questionIds":ids}),3,"POST",false,PlatformOperation::Read)?;
-        merge_existing(&mut questions, &answers);
+        let has_answers = self.feature_request(
+            &format!("{base}/answer/hasAnswer"),
+            &json!({"recruitId":remote_id(&course.recruit_id),"stuExamId":remote_id(&student),"examId":remote_id(&exam_id)}),
+            3,
+            "POST",
+            false,
+            PlatformOperation::Read,
+        )?;
+        match number(&has_answers["rt"]) {
+            Some(0) => {}
+            Some(1) => {
+                let endpoint = if exam {
+                    "getStuAnswerInfo"
+                } else {
+                    "getStuAnswerInfoNew"
+                };
+                let answers=self.feature_request(&format!("{base}/answer/{endpoint}"),&json!({"recruitId":remote_id(&course.recruit_id),"stuExamId":remote_id(&student),"examId":remote_id(&exam_id),"schoolId":remote_id(&school),"courseId":remote_id(&course.id),"questionIds":ids}),3,"POST",false,PlatformOperation::Read)?;
+                let data = net::data(&answers)?;
+                if !data.is_object() && !data.is_array() {
+                    return Err(protocol_error());
+                }
+                merge_existing(&mut questions, &answers);
+            }
+            _ => return Err(protocol_error()),
+        }
         for q in &mut questions {
             if q.kind == "blank" && q.blanks > 1 && q.answer.len() == 1 {
                 q.answer = q.answer[0].split('/').map(str::to_owned).collect();

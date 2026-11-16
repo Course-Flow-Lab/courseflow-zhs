@@ -1242,6 +1242,7 @@ fn remote_id(id: &str) -> Value {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::host::FetchResponse;
 
     #[test]
     fn watch_points_follow_the_client_recipe() {
@@ -1332,49 +1333,48 @@ mod tests {
     fn url_component_encoding_is_strict() {
         assert_eq!(encode_component("a b/c+d="), "a%20b%2Fc%2Bd%3D");
     }
+    struct FeatureHost {
+        replies: Mutex<std::collections::VecDeque<Value>>,
+        requests: Mutex<Vec<FetchRequest>>,
+        state: Mutex<HashMap<(String, String), Value>>,
+    }
+    impl Host for FeatureHost {
+        fn now(&self) -> Result<i64, ModuleError> {
+            Ok(1000)
+        }
+        fn fetch(&self, r: &FetchRequest) -> Result<FetchResponse, ModuleError> {
+            self.requests.lock().unwrap().push(r.clone());
+            let v = self.replies.lock().unwrap().pop_front().expect("预置响应");
+            Ok(FetchResponse {
+                status: 200,
+                headers: Default::default(),
+                body: v.to_string(),
+            })
+        }
+        fn state_get(&self, n: &str, k: &str, _s: &str) -> Result<Value, ModuleError> {
+            Ok(self
+                .state
+                .lock()
+                .unwrap()
+                .get(&(n.into(), k.into()))
+                .cloned()
+                .unwrap_or(Value::Null))
+        }
+        fn state_set(&self, n: &str, k: &str, v: &Value, _s: &str) -> Result<(), ModuleError> {
+            self.state
+                .lock()
+                .unwrap()
+                .insert((n.into(), k.into()), v.clone());
+            Ok(())
+        }
+        fn log(&self, _l: &str, _m: &str, _v: Value) {}
+    }
+
     #[test]
     fn smart_paper_reads_in_batches_without_reopening_or_writing_readonly() {
-        use crate::host::FetchResponse;
         use crate::zhs::features::{FeatureClient, types};
-        use std::collections::VecDeque;
-        struct HostMock {
-            replies: Mutex<VecDeque<Value>>,
-            requests: Mutex<Vec<FetchRequest>>,
-            state: Mutex<HashMap<(String, String), Value>>,
-        }
-        impl Host for HostMock {
-            fn now(&self) -> Result<i64, ModuleError> {
-                Ok(1000)
-            }
-            fn fetch(&self, r: &FetchRequest) -> Result<FetchResponse, ModuleError> {
-                self.requests.lock().unwrap().push(r.clone());
-                let v = self.replies.lock().unwrap().pop_front().expect("预置响应");
-                Ok(FetchResponse {
-                    status: 200,
-                    headers: Default::default(),
-                    body: v.to_string(),
-                })
-            }
-            fn state_get(&self, n: &str, k: &str, _s: &str) -> Result<Value, ModuleError> {
-                Ok(self
-                    .state
-                    .lock()
-                    .unwrap()
-                    .get(&(n.into(), k.into()))
-                    .cloned()
-                    .unwrap_or(Value::Null))
-            }
-            fn state_set(&self, n: &str, k: &str, v: &Value, _s: &str) -> Result<(), ModuleError> {
-                self.state
-                    .lock()
-                    .unwrap()
-                    .insert((n.into(), k.into()), v.clone());
-                Ok(())
-            }
-            fn log(&self, _l: &str, _m: &str, _v: Value) {}
-        }
         let replies=std::iter::once(json!({"code":0,"data":{}})).chain(std::iter::once(json!({"code":0,"data":{"questionCount":8,"partSheetVos":[{"questionSheetVos":(1..=8).map(|n|json!({"questionId":n,"version":1})).collect::<Vec<_>>()}]}}))).chain((1..=8).map(|n|json!({"code":0,"data":{"questionInfo":{"id":n,"content":"题干","questionType":1,"optionVos":[{"id":"a","content":"甲"},{"id":"b","content":"乙"}],"userAnswer":"a"}}}))).collect();
-        let host = HostMock {
+        let host = FeatureHost {
             replies: Mutex::new(replies),
             requests: Mutex::new(vec![]),
             state: Mutex::new(HashMap::new()),
@@ -1434,5 +1434,76 @@ mod tests {
                 .contains("不会重复开卷")
         );
         assert_eq!(host.requests.lock().unwrap().len(), before);
+    }
+
+    #[test]
+    fn shared_papers_read_existing_answers_through_the_current_gateway() {
+        use crate::zhs::features::{FeatureClient, types};
+        for exam in [false, true] {
+            for has_answers in [0, 1, 2] {
+                let mut replies = std::collections::VecDeque::from([
+                    json!({"status":"200","rt":{"schoolId":8}}),
+                    json!({"status":"200","code":1,"rt":{"examBase":{"questionCount":1,"workExamParts":[{"questionDtos":[{"eid":"q1","questionType":1,"name":"合成题干","questionOptions":[{"id":"a","content":"甲"},{"id":"b","content":"乙"}]}]}]}}}),
+                    json!({"status":"200","rt":has_answers}),
+                ]);
+                if has_answers == 1 {
+                    replies.push_back(json!({"status":"200","rt":{"q1":{"answer":"a"}}}));
+                }
+                let host = FeatureHost {
+                    replies: Mutex::new(replies),
+                    requests: Mutex::new(vec![]),
+                    state: Mutex::new(HashMap::new()),
+                };
+                let keys = Keys::default();
+                keys.put("s", 3, b"0123456789abcdef".to_vec());
+                let client = FeatureClient {
+                    host: &host,
+                    keys: &keys,
+                    session: "s",
+                    request: "job/0",
+                };
+                let course: types::Course = serde_json::from_value(json!({"id":"1","recruit_id":"2","name":"合成课程","kind":"shared","progress":null,"outline_available":true})).unwrap();
+                let paper: types::Paper = serde_json::from_value(json!({"id":"p","name":"合成试卷","category":"作业","available":true,"done":false,"reason":"","status_label":"","score":null,"attempts_left":null,"opens_at":null,"ends_at":null,"native":{"_exam_id":"3","_student":"4","_exam":exam}})).unwrap();
+                let opened = client.feature_open(&course, &paper);
+                if has_answers == 2 {
+                    assert_eq!(opened.err().unwrap().code, "platform_protocol_changed");
+                    assert_eq!(host.requests.lock().unwrap().len(), 3);
+                    continue;
+                }
+                let attempt = opened.unwrap();
+                assert_eq!(attempt.questions.len(), 1);
+                assert_eq!(
+                    attempt.questions[0].answer,
+                    if has_answers == 1 { vec!["a"] } else { vec![] }
+                );
+                let requests = host.requests.lock().unwrap();
+                let base = if exam {
+                    "https://taurusexam-api.zhihuishu.com/taurusExam/gateway/t/v1"
+                } else {
+                    "https://studentexam-api.zhihuishu.com/studentExam/gateway/t/v1"
+                };
+                assert_eq!(requests[2].url, format!("{base}/answer/hasAnswer"));
+                if has_answers == 1 {
+                    assert_eq!(
+                        requests[3].url,
+                        format!(
+                            "{base}/answer/{}",
+                            if exam {
+                                "getStuAnswerInfo"
+                            } else {
+                                "getStuAnswerInfoNew"
+                            }
+                        )
+                    );
+                }
+                assert_eq!(requests.len(), if has_answers == 1 { 4 } else { 3 });
+                assert!(
+                    requests
+                        .iter()
+                        .skip(2)
+                        .all(|r| matches!(r.stage, Some(Stage::Read)) && !r.commit)
+                );
+            }
+        }
     }
 }
