@@ -98,12 +98,17 @@ impl FeatureClient<'_> {
             }),
             commit: operation != PlatformOperation::Read,
         };
-        let response = crate::zhs::fetch(self.host, request)?;
+        let context = |mut error: ModuleError| {
+            error.message = format!("{}；接口：{method} {url}", error.message);
+            error
+        };
+        let response = crate::zhs::fetch(self.host, request).map_err(context)?;
         if response.body.trim().is_empty() && url.ends_with("/exam/user/submit") {
             return Ok(json!({"code":0,"http_acknowledged":true}));
         }
-        let value: Value = serde_json::from_str(&response.body).map_err(|_| protocol_error())?;
-        feature_ok(&value)?;
+        let value: Value =
+            serde_json::from_str(&response.body).map_err(|_| context(protocol_error()))?;
+        feature_ok(&value, module == 3).map_err(context)?;
         Ok(value)
     }
     pub fn feature_write(&self, request: &WriteRequest) -> Result<Value> {
@@ -139,7 +144,7 @@ impl FeatureClient<'_> {
                 PlatformOperation::SaveStudy,
             )?
         };
-        feature_ok(&reply)?;
+        feature_ok(&reply, module == 3)?;
         if request.url.ends_with("saveStudentAnswer") || request.url.ends_with("/answer/submit") {
             match number(&reply["rt"]["statu"]) {
                 Some(1) => {}
@@ -161,30 +166,78 @@ fn protocol_error() -> ModuleError {
 fn login_expired() -> ModuleError {
     ModuleError::login_expired("智慧树登录已过期，请重新扫码")
 }
-fn feature_ok(value: &Value) -> Result<()> {
-    let code = value
-        .get("code")
-        .and_then(number)
-        .or_else(|| value.get("status").and_then(number));
+fn feature_ok(value: &Value, shared_exam: bool) -> Result<()> {
+    // 共享课作业考试以 status 判定成功，code 可能附带验证状态。
+    let code = if shared_exam {
+        value.get("status").and_then(number)
+    } else {
+        value
+            .get("code")
+            .and_then(number)
+            .or_else(|| value.get("status").and_then(number))
+    };
+    let message = first(value, &["msg", "message", "errorMsg"])
+        .chars()
+        .take(400)
+        .map(|c| if c.is_control() { ' ' } else { c })
+        .collect::<String>();
+    let context = |mut error: ModuleError| {
+        let mut details = vec![];
+        for field in ["status", "code"] {
+            if let Some(code) = value.get(field).and_then(number) {
+                details.push(format!("{field}={code}"));
+            }
+        }
+        if !message.is_empty() {
+            details.push(format!("平台提示：{message}"));
+        }
+        if !details.is_empty() {
+            error.message = format!("{}（{}）", error.message, details.join("，"));
+        }
+        error
+    };
+    if shared_exam && code.is_none() {
+        return Err(context(ModuleError::protocol_changed(
+            "智慧树作业考试响应缺少有效 status",
+        )));
+    }
     if matches!(code, Some(401 | 403 | 5008)) {
-        return Err(login_expired());
+        return Err(context(login_expired()));
     }
     if code == Some(2004) {
-        return Err(ModuleError::new("no_questions", "此知识点暂无练习题"));
+        return Err(context(ModuleError::new(
+            "no_questions",
+            "此知识点暂无练习题",
+        )));
     }
     if code == Some(2019) {
-        return Err(ModuleError::rejected("课程学习已结束，不能继续提升掌握度"));
+        return Err(context(ModuleError::rejected(
+            "课程学习已结束，不能继续提升掌握度",
+        )));
     }
-    if code == Some(1010) {
-        return Err(ModuleError::verification_required(
+    let rejected = code.is_some_and(|c| {
+        if shared_exam {
+            c != 200
+        } else {
+            ![0, 200].contains(&c)
+        }
+    }) || value["success"] == false;
+    if code == Some(1010)
+        || shared_exam && (code == Some(-12) || number(&value["code"]) == Some(-12))
+        || rejected
+            && ["验证", "滑块", "人脸"]
+                .iter()
+                .any(|hint| message.contains(hint))
+    {
+        return Err(context(ModuleError::verification_required(
             "平台要求额外验证，请在官方页面完成后继续",
-        ));
+        )));
     }
-    if code.is_some_and(|c| ![0, 200].contains(&c)) || value["success"] == false {
-        return Err(ModuleError::new(
+    if rejected {
+        return Err(context(ModuleError::new(
             "platform_rejected",
             "智慧树拒绝本次操作，请核对开放状态、可用次数和验证提示",
-        ));
+        )));
     }
     Ok(())
 }
@@ -293,4 +346,37 @@ mod net {
 
 pub fn normalize_popup(raw: &Value) -> Result<types::Question> {
     questions::parse_question(raw, true)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn shared_exam_uses_status_instead_of_the_auxiliary_code() {
+        assert!(feature_ok(&json!({"status":"200","code":1,"rt":{}}), true).is_ok());
+        let error =
+            feature_ok(&json!({"status":"500","code":0,"msg":"试卷已截止"}), true).unwrap_err();
+        assert_eq!(error.code, "platform_rejected");
+        assert!(error.message.contains("status=500"));
+        assert!(error.message.contains("试卷已截止"));
+        assert!(feature_ok(&json!({"code":0,"rt":{}}), true).is_err());
+        assert!(feature_ok(&json!({"code":0,"data":{}}), false).is_ok());
+    }
+
+    #[test]
+    fn verification_keeps_the_platform_reason_and_is_never_treated_as_success() {
+        for value in [
+            json!({"status":200,"code":-12,"msg":"请完成验证"}),
+            json!({"status":500,"msg":"请先完成滑块验证"}),
+            json!({"code":1010,"message":"请完成人脸验证"}),
+        ] {
+            let error = feature_ok(&value, value.get("status").is_some()).unwrap_err();
+            assert_eq!(error.code, "platform_verification_required");
+            assert!(error.message.contains("平台提示："));
+        }
+        let error = feature_ok(&json!({"status":401,"msg":"登录已过期"}), true).unwrap_err();
+        assert_eq!(error.code, "platform_login_expired");
+        assert!(error.message.contains("status=401"));
+    }
 }

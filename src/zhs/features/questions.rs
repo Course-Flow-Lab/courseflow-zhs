@@ -103,7 +103,12 @@ pub(super) fn merge_existing(questions: &mut [Question], reply: &Value) {
             {
                 q.answer = providers::answer_strings(&q.kind, answer);
             }
-            for child in object.values() {
+            for (key, child) in object {
+                if let Some(q) = questions.iter_mut().find(|q| &q.id == key)
+                    && let Some(answer) = child.get("answer").or_else(|| child.get("studentAnswer"))
+                {
+                    q.answer = providers::answer_strings(&q.kind, answer);
+                }
                 if child.is_array() || child.is_object() {
                     stack.push(child);
                 }

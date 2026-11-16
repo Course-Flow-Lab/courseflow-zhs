@@ -735,7 +735,7 @@ fn qa_request(
     if value["loading"] == true {
         return Ok(value);
     }
-    feature_ok(&value)?;
+    feature_ok(&value, false)?;
     Ok(value)
 }
 fn qa_board(client: &FeatureClient, course: &catalog::Course, params: &Value) -> Result<Value> {
