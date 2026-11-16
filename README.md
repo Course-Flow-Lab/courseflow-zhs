@@ -1,6 +1,6 @@
 # Courseflow 智慧树模块
 
-`courseflow-zhs` 是智慧树平台的独立 Rust 模块，通过 stdin／stdout 的 NDJSON JSON-RPC 接入 [Courseflow 框架](https://github.com/Course-Flow-Lab/courseflow-framework)。模块 API 为 1，当前模块版本为 0.3.4，需要框架 `>=0.1.6 <0.2.0`。
+`courseflow-zhs` 是智慧树平台的独立 Rust 模块，通过 stdin／stdout 的 NDJSON JSON-RPC 接入 [Courseflow 框架](https://github.com/Course-Flow-Lab/courseflow-framework)。模块 API 为 1，当前模块版本为 0.3.7，需要框架 `>=0.1.6 <0.2.0`。
 
 平台协议和官方页面脚本在本仓库；HTTP 凭据、Cookie 容器、持久化加密、模型密钥、浏览器进程和任务调度由框架管理。模块独立运行，不导入或启动其他平台工程。
 
@@ -12,7 +12,7 @@
 | --- | --- |
 | 模块 id／平台 id | `zhs` |
 | 名称 | 智慧树 |
-| 版本／`moduleApi` | 0.3.4／1 |
+| 版本／`moduleApi` | 0.3.7／1 |
 | 框架范围 | `engines.framework`: `>=0.1.6 <0.2.0` |
 | 运行形态 | `runtime.engine`: `binary`，入口 `target/release/courseflow-zhs` |
 | 登录方式 | `qr`（扫码） |
@@ -52,6 +52,10 @@
 0.3.5 修正共享课作业读取已有答案的流程：先检查 `hasAnswer`，有答案时使用 `getStuAnswerInfoNew`，并保留按题号返回的答案；考试使用独立考试网关。平台错误提示会包含接口、返回码和平台说明，便于区分开卷与读取答案失败。
 
 0.3.6 修正普通小节被误当成子视频的问题：开始学习及弹题请求只在确有子视频时发送 `lessonVideoId`，学习网关拒绝请求时保留具体接口。Framework 0.1.9 起，短时试跑仅供管理员诊断，普通成员直接使用课程学习。
+
+0.3.7 兼容作业接口以 `questionType: {id, name}` 对象返回题型，继续兼容数字及数字字符串；保存答案时发送数字题型编号。未知编号仍需人工处理，不按显示名称猜测题型。此前被标为不支持的题目需要在更新模块后创建新任务重新读取。
+
+本版经用户授权在 localhost 使用实际账号验证了一份五题共享课作业：题型识别、模型作答、平台草稿保存和已有答案回读均通过；任务停在交卷确认，未交卷。自动测试仍只使用合成数据，实际账号资料与原始响应保存在源码之外。
 
 ## 构建与安装
 
