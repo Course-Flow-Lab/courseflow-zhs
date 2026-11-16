@@ -471,8 +471,8 @@ pub fn platform_message(reply: &Value) -> String {
         .to_owned()
 }
 
-fn learning_data(reply: &Value) -> Result<&Value, ModuleError> {
-    match number(&reply["code"]) {
+fn learning_data<'a>(reply: &'a Value, endpoint: &str) -> Result<&'a Value, ModuleError> {
+    let result = match number(&reply["code"]) {
         Some(0) => reply
             .get("data")
             .filter(|value| value.is_object())
@@ -485,12 +485,20 @@ fn learning_data(reply: &Value) -> Result<&Value, ModuleError> {
         Some(-12) => Err(ModuleError::verification_required(
             "智慧树要求额外验证，请先到官方页面处理后重试",
         )),
+        Some(421) => Err(ModuleError::rejected(format!(
+            "智慧树拒绝学习请求（code 421）：{}；请核对官方页面能否播放当前视频",
+            platform_message(reply)
+        ))),
         Some(code) => Err(ModuleError::protocol_changed(format!(
             "学习网关返回了未预期的 code {code}：{}",
             platform_message(reply)
         ))),
         None => Err(ModuleError::protocol_changed("学习网关响应缺少 code")),
-    }
+    };
+    result.map_err(|mut error| {
+        error.message = format!("{}；接口：{endpoint}", error.message);
+        error
+    })
 }
 
 struct ParsedVideo {
@@ -506,7 +514,7 @@ struct ParsedVideo {
 }
 
 fn parse_outline(course: &Course, reply: &Value) -> Result<Vec<ParsedVideo>, ModuleError> {
-    let data = learning_data(reply)?;
+    let data = learning_data(reply, endpoints::OUTLINE_VIDEOLIST_PATH)?;
     if id_string(&data["recruitId"]).as_deref() != Some(course.recruit_id.as_str()) {
         return Err(ModuleError::protocol_changed(
             "目录返回的 recruitId 与课程不一致",
@@ -595,7 +603,7 @@ fn apply_progress(
         origin,
         Stage::Read,
     )?;
-    let data = learning_data(&reply)?;
+    let data = learning_data(&reply, endpoints::OUTLINE_PROGRESS_PATH)?;
     for key_name in ["lesson", "lv"] {
         if !data[key_name].is_null() && !data[key_name].is_object() {
             return Err(ModuleError::protocol_changed("进度响应结构不正确"));
@@ -776,6 +784,10 @@ impl Prepared {
     }
 }
 
+fn small_lesson_id(unit: &Unit) -> Option<&str> {
+    (unit.id != unit.lesson_id).then_some(unit.id.as_str())
+}
+
 /// `queryCourse` → chapter gate → optional time limit → popup pointers → `prelearningNote`.
 #[allow(clippy::too_many_arguments)]
 pub fn prepare(
@@ -810,7 +822,7 @@ pub fn prepare(
         origin,
         Stage::Read,
     )?;
-    let policy = learning_data(&policy_reply)?;
+    let policy = learning_data(&policy_reply, endpoints::STUDY_QUERY_COURSE_PATH)?;
     if id_string(&policy["recruitId"]).as_deref() != Some(course.recruit_id.as_str())
         || id_string(&policy["courseInfo"]["courseId"]).as_deref() != Some(course.id.as_str())
     {
@@ -846,8 +858,8 @@ pub fn prepare(
         "recruitId": remote_id(&course.recruit_id),
         "lessonId": remote_id(&unit.lesson_id),
     });
-    if unit.video_id.is_some() {
-        popup["lessonVideoId"] = remote_id(&unit.id);
+    if let Some(id) = small_lesson_id(unit) {
+        popup["lessonVideoId"] = remote_id(id);
     }
     let pointers = signed_post(
         host,
@@ -859,7 +871,7 @@ pub fn prepare(
         origin,
         Stage::Read,
     )?;
-    let pointers = learning_data(&pointers)?;
+    let pointers = learning_data(&pointers, endpoints::STUDY_POPUP_PATH)?;
     let mut questions: Vec<(i64, Value)> = Vec::new();
     for row in array_or_empty(&pointers["questionPoint"])? {
         let at = number(&row["timeSec"])
@@ -891,9 +903,8 @@ pub fn prepare(
         "recruitId": remote_id(&course.recruit_id),
         "videoId": remote_id(&media_id),
     });
-    let small = unit.video_id.is_some() && unit.id != media_id;
-    if small {
-        input["lessonVideoId"] = remote_id(&unit.id);
+    if let Some(id) = small_lesson_id(unit) {
+        input["lessonVideoId"] = remote_id(id);
     }
     let reply = signed_post(
         host,
@@ -905,7 +916,7 @@ pub fn prepare(
         origin,
         Stage::OpenStudy,
     )?;
-    let data = learning_data(&reply)?;
+    let data = learning_data(&reply, endpoints::STUDY_OPEN_PATH)?;
     if flag(&data["isSlide"])? || flag(&data["isFace"])? {
         return Err(ModuleError::verification_required(
             "智慧树要求验证码或身份验证，请先到官方页面处理",
@@ -929,7 +940,7 @@ pub fn prepare(
         media_id,
         chapter_id: unit.chapter_id.clone(),
         lesson_id: unit.lesson_id.clone(),
-        small_lesson_id: if small { Some(unit.id.clone()) } else { None },
+        small_lesson_id: small_lesson_id(unit).map(str::to_owned),
         limited,
         school_id,
         questions,
@@ -973,7 +984,7 @@ fn study_limit(
             commit: false,
         },
     )?;
-    let data = learning_data(&reply)?;
+    let data = learning_data(&reply, endpoints::STUDY_LIMIT_PATH)?;
     if !flag(&data["studyTimeDto"]["canBeStudyNow"])? {
         return Err(ModuleError::new(
             "platform_rejected",
@@ -1007,21 +1018,24 @@ pub fn popup_answers(
 ) -> Result<Vec<super::features::types::Question>, ModuleError> {
     let key = protocol_key(host, keys, session, 11)?;
     let origin = "https://studyvideoh5.zhihuishu.com";
+    let mut payload = json!({
+        "lessonId": remote_id(&unit.lesson_id),
+        "questionIds": question_ids,
+    });
+    if let Some(id) = small_lesson_id(unit) {
+        payload["lessonVideoId"] = remote_id(id);
+    }
     let reply = signed_post(
         host,
         session,
         endpoints::LEARNING_BASE,
         endpoints::POPUP_EXAM_PATH,
-        json!({
-            "lessonId": remote_id(&unit.lesson_id),
-            "lessonVideoId": remote_id(&unit.id),
-            "questionIds": question_ids,
-        }),
+        payload,
         &key,
         origin,
         Stage::Read,
     )?;
-    let data = learning_data(&reply)?;
+    let data = learning_data(&reply, endpoints::POPUP_EXAM_PATH)?;
     let items = data["lessonTestQuestionUseInterfaceDtos"]
         .as_array()
         .ok_or_else(|| ModuleError::protocol_changed("弹题响应缺少题目数组"))?;
@@ -1068,21 +1082,24 @@ pub fn popup_answers(
         return Ok(pending);
     }
     for (id, answer) in writes {
+        let mut payload = json!({
+            "courseId": remote_id(&course.id),
+            "recruitId": remote_id(&course.recruit_id),
+            "testQuestionId": remote_id(&id),
+            "isCurrent": "1",
+            "lessonId": remote_id(&unit.lesson_id),
+            "answer": answer.join(","),
+            "testType": 0,
+        });
+        if let Some(id) = small_lesson_id(unit) {
+            payload["lessonVideoId"] = remote_id(id);
+        }
         let reply = signed_post(
             host,
             session,
             endpoints::LEARNING_BASE,
             endpoints::POPUP_SAVE_PATH,
-            json!({
-                "courseId": remote_id(&course.id),
-                "recruitId": remote_id(&course.recruit_id),
-                "testQuestionId": remote_id(&id),
-                "isCurrent": "1",
-                "lessonId": remote_id(&unit.lesson_id),
-                "lessonVideoId": remote_id(&unit.id),
-                "answer": answer.join(","),
-                "testType": 0,
-            }),
+            payload,
             &key,
             origin,
             Stage::SaveStudy,
@@ -1368,6 +1385,78 @@ mod tests {
             Ok(())
         }
         fn log(&self, _l: &str, _m: &str, _v: Value) {}
+    }
+
+    #[test]
+    fn shared_study_does_not_send_a_parent_lesson_as_a_small_lesson() {
+        use aes::cipher::{BlockDecryptMut, KeyIvInit, block_padding::Pkcs7};
+        const KEY: &[u8; 16] = b"0123456789abcdef";
+        for small in [false, true] {
+            let host = FeatureHost {
+                replies: Mutex::new(std::collections::VecDeque::from([
+                    json!({"code":0,"data":{"recruitId":2,"studyStatus":0,"courseInfo":{"courseId":1,"canJumpChapter":true,"type":0}}}),
+                    json!({"code":0,"data":{"questionPoint":[]}}),
+                    json!({"code":0,"data":{"isSlide":false,"isFace":false,"studiedLessonDto":{"id":7,"learnTimeSec":0,"studyTotalTime":0}}}),
+                    json!({"code":0,"data":{"lessonTestQuestionUseInterfaceDtos":[{"testQuestion":{"questionId":40,"questionOptions":[{"id":50,"result":1},{"id":51,"result":0}]}}]}}),
+                    json!({"code":0}),
+                ])),
+                requests: Mutex::new(vec![]),
+                state: Mutex::new(HashMap::new()),
+            };
+            let keys = Keys::default();
+            keys.put("s", 11, KEY.to_vec());
+            let course: Course = serde_json::from_value(json!({"id":"1","recruit_id":"2","name":"合成课程","kind":"shared","outline_available":true})).unwrap();
+            let unit: Unit = serde_json::from_value(json!({"id":if small{"30"}else{"20"},"name":"合成视频","chapter_id":"10","chapter_name":"第一章","lesson_id":"20","kind":"video","duration_seconds":60,"watched_seconds":0,"state":"not_started","video_id":"99","selectable":true})).unwrap();
+            let prepared = prepare(&host, &keys, "s", "", &course, "entry", &unit, false).unwrap();
+            assert_eq!(
+                prepared.small_lesson_id.as_deref(),
+                if small { Some("30") } else { None }
+            );
+            assert!(answer_popup(&host, &keys, "s", &course, &unit, &json!([40])).unwrap());
+            let requests = host.requests.lock().unwrap();
+            assert_eq!(requests.len(), 5);
+            for request in requests.iter().skip(1) {
+                let encrypted = base64::engine::general_purpose::STANDARD
+                    .decode(
+                        request.body.as_ref().unwrap()["secretStr"]
+                            .as_str()
+                            .unwrap(),
+                    )
+                    .unwrap();
+                let bytes =
+                    cbc::Decryptor::<aes::Aes128>::new_from_slices(KEY, b"1g3qqdh4jvbskb9x")
+                        .unwrap()
+                        .decrypt_padded_vec_mut::<Pkcs7>(&encrypted)
+                        .unwrap();
+                let payload: Value = serde_json::from_slice(&bytes).unwrap();
+                assert_eq!(payload["lessonId"], 20);
+                assert_eq!(
+                    payload.get("lessonVideoId").and_then(Value::as_u64),
+                    if small { Some(30) } else { None },
+                    "{}",
+                    request.url
+                );
+                if request.url.ends_with("prelearningNote") {
+                    assert_eq!(payload["videoId"], 99);
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn learning_permission_errors_preserve_the_failing_endpoint() {
+        let reply = json!({"code":421,"message":"该账号无权限!"});
+        for endpoint in [
+            endpoints::STUDY_QUERY_COURSE_PATH,
+            endpoints::STUDY_POPUP_PATH,
+            endpoints::STUDY_OPEN_PATH,
+        ] {
+            let error = learning_data(&reply, endpoint).unwrap_err();
+            assert_eq!(error.code, "platform_rejected");
+            assert!(error.message.contains("421"));
+            assert!(error.message.contains("该账号无权限"));
+            assert!(error.message.contains(endpoint));
+        }
     }
 
     #[test]
