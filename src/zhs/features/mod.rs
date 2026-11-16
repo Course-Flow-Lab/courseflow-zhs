@@ -14,7 +14,7 @@ mod questions;
 mod scores;
 mod smart;
 pub mod types;
-use questions::{knowledge_points, merge_existing, parse_question, remote_id};
+use questions::{knowledge_points, merge_existing, parse_question, question_type, remote_id};
 use types as providers;
 use types::{Attempt, OptionItem, Paper, Question, Unit, WriteRequest};
 type Result<T> = std::result::Result<T, ModuleError>;

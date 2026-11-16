@@ -781,6 +781,17 @@ fn popup_normalization_keeps_images_and_unknown_types_require_manual_handling() 
     assert!(!validate_answer(&unsupported, &["猜测".into()]));
 }
 
+#[test]
+fn question_type_objects_are_decoded_without_guessing_from_the_display_name() {
+    use courseflow_zhs::zhs::features::normalize_popup;
+    for (id, kind) in [(1, "single"), (2, "multiple"), (3, "blank"), (14, "single"), (999, "unsupported")] {
+        for value in [json!(id), json!({"id":id,"name":"仅供显示"}), json!({"id":id.to_string(),"name":"仅供显示"})] {
+            let question = normalize_popup(&json!({"eid":"synthetic","questionType":value,"name":"合成题干","questionOptions":[{"id":"a","content":"甲"},{"id":"b","content":"乙"}]})).unwrap();
+            assert_eq!(question.kind, kind, "questionType={value}");
+        }
+    }
+}
+
 fn meeting_context(host: &MockHost) -> Value {
     let course = fixture_course(&fixture(), host);
     let key = format!(

@@ -1,4 +1,8 @@
 use super::*;
+pub(super) fn question_type(raw: &Value) -> Option<i64> {
+    let value = &raw["questionType"];
+    number(value).or_else(|| number(&value["id"]))
+}
 pub(super) fn knowledge_points(value: &Value) -> Vec<Value> {
     if let Some(themes) = value["cakeThemeList"].as_array() {
         return themes
@@ -32,7 +36,7 @@ pub fn parse_question(raw: &Value, shared: bool) -> Result<Question> {
             &["content", "name", "title"]
         },
     );
-    let kind = match number(&raw["questionType"]) {
+    let kind = match question_type(raw) {
         Some(1 | 14) => "single",
         Some(2) => "multiple",
         Some(3) => "blank",

@@ -437,7 +437,7 @@ impl FeatureClient<'_> {
                 }
             }
             let mut metadata = entry.clone();
-            metadata["questionType"] = raw["questionType"].clone();
+            metadata["questionType"] = json!(question_type(raw));
             mapping.insert(id, metadata);
             questions.push(q);
             cache["questions"] = json!(questions);
@@ -490,7 +490,7 @@ impl FeatureClient<'_> {
             };
             let (url, encoding, payload) = if shared {
                 let raw = &attempt.native["mapping"][&q.id];
-                let item = json!({"examId":attempt.native["exam_id"],"recruitId":remote_id(&course.recruit_id),"stuExamId":attempt.native["student"],"eid":remote_id(&q.id),"schoolId":attempt.native["school"],"deviceId":"","examType":if exam{json!(1)}else{json!("")},"fromType":3,"answer":answer,"dataIds":"","questionType":raw["questionType"]});
+                let item = json!({"examId":attempt.native["exam_id"],"recruitId":remote_id(&course.recruit_id),"stuExamId":attempt.native["student"],"eid":remote_id(&q.id),"schoolId":attempt.native["school"],"deviceId":"","examType":if exam{json!(1)}else{json!("")},"fromType":3,"answer":answer,"dataIds":"","questionType":question_type(raw)});
                 let mut payload = json!({"stuExamAnswer":json!([item]).to_string(),"recruitId":remote_id(&course.recruit_id)});
                 if exam {
                     payload["__source"] = json!(1);

@@ -1595,4 +1595,32 @@ mod tests {
             }
         }
     }
+
+    #[test]
+    fn shared_homework_decodes_object_types_and_saves_numeric_type_ids() {
+        use crate::zhs::features::{FeatureClient, types};
+        let rows = [14, 2, 1].into_iter().enumerate().map(|(i, id)| json!({"eid":format!("q{i}"),"questionType":{"id":id,"name":"合成题型"},"name":"合成题干","questionOptions":[{"id":"a","content":"甲"},{"id":"b","content":"乙"}]})).collect::<Vec<_>>();
+        let host = FeatureHost {
+            replies: Mutex::new(std::collections::VecDeque::from([
+                json!({"status":200,"rt":{"schoolId":8}}),
+                json!({"status":200,"rt":{"examBase":{"questionCount":3,"workExamParts":[{"questionDtos":rows}]}}}),
+                json!({"status":200,"rt":0}),
+            ])),
+            requests: Mutex::new(vec![]), state: Mutex::new(HashMap::new()),
+        };
+        let keys = Keys::default(); keys.put("s", 3, b"0123456789abcdef".to_vec());
+        let client = FeatureClient { host: &host, keys: &keys, session: "s", request: "synthetic/0" };
+        let course: types::Course = serde_json::from_value(json!({"id":"1","recruit_id":"2","name":"合成课程","kind":"shared","progress":null,"outline_available":true})).unwrap();
+        let paper: types::Paper = serde_json::from_value(json!({"id":"p","name":"合成作业","category":"作业","available":true,"done":false,"reason":"","status_label":"","score":null,"attempts_left":null,"opens_at":null,"ends_at":null,"native":{"_exam_id":"3","_student":"4","_exam":false}})).unwrap();
+        let attempt = client.feature_open(&course, &paper).unwrap();
+        assert_eq!(attempt.questions.iter().map(|q|q.kind.as_str()).collect::<Vec<_>>(), vec!["single", "multiple", "single"]);
+        let answers = attempt.questions.iter().map(|q|(q.id.clone(),vec!["a".to_owned()])).collect::<HashMap<_,_>>();
+        let writes = client.feature_writes(&course, &attempt, &answers, false).unwrap();
+        assert_eq!(writes.len(), 3);
+        for (request, expected) in writes.iter().zip([14, 2, 1]) {
+            let items: serde_json::Value = serde_json::from_str(request.payload["stuExamAnswer"].as_str().unwrap()).unwrap();
+            assert_eq!(items[0]["questionType"], expected);
+            assert_eq!(request.stage, "draft");
+        }
+    }
 }
