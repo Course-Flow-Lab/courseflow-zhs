@@ -59,7 +59,7 @@
 
 ## 本地拼图验证
 
-0.3.8 接入 Framework 0.1.13 的共享 ddddocr 服务，覆盖共享课开始学习和保存进度时触发的拼图，也用于短时试跑和每日复习。先按[框架部署说明](https://github.com/Course-Flow-Lab/courseflow-framework/blob/feat/ddddocr-captcha/docs/CAPTCHA.md)启动本地后端，并在框架服务设置 `CF_CAPTCHA_URL`。模块本身不安装 Python 依赖。
+0.3.8 接入 Framework 0.1.13 的共享 ddddocr 服务，覆盖共享课开始学习和保存进度时触发的拼图，也用于短时试跑和每日复习。先按[框架部署说明](https://github.com/Course-Flow-Lab/courseflow-framework/blob/main/docs/CAPTCHA.md)启动本地后端，并在框架服务设置 `CF_CAPTCHA_URL`。模块本身不安装 Python 依赖。
 
 验证分步骤执行，总计最多等待 60 秒；同一次明确拒绝只自动处理一次。只有官方组件返回令牌且智慧树 `validateSlideToken` 确认通过才继续，验证期间不累计学习时长。失败时关闭页面、保留检查点并暂停，令牌和图片不进入检查点。人脸、短信、图形点选、登录和作业考试的额外验证仍需人工完成。
 
