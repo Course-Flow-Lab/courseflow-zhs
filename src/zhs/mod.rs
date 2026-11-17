@@ -4,6 +4,7 @@
 //! 显式设置 `fixture` 才使用离线样例。无效配置会阻止进程启动。
 //! 模块只接收不透明会话句柄，HTTP 凭据、模型密钥和浏览器由宿主管理。
 
+pub mod captcha;
 pub mod catalog;
 pub mod crypto;
 pub mod endpoints;
@@ -209,6 +210,12 @@ impl Zhs {
             return Ok(json!({"status":"completed","evidence":{"already_completed":true}}));
         }
         let generation = options["execution_id"].as_str().unwrap_or("");
+        if let Some(cp) = checkpoint.filter(|v| v["phase"] == "captcha") {
+            return captcha::step(host, &self.keys, session, course, unit, cp, generation);
+        }
+        let captcha_retry = checkpoint.is_some_and(|cp| {
+            cp["captcha_retry"] == true && cp["execution_id"].as_str().unwrap_or("") == generation
+        });
         let identity = host.identity(session)?;
         let account = identity["account_raw"].as_str().unwrap_or("");
         let resumed = checkpoint.filter(|v| v["phase"] == "running");
@@ -221,9 +228,28 @@ impl Zhs {
             } else {
                 self.earlier_incomplete(host, session, course, unit)?
             };
-            let mut p = live::prepare(
+            let preparation = live::prepare(
                 host, &self.keys, session, account, course, &entry, unit, earlier,
             )?;
+            let mut p = match preparation {
+                live::Preparation::Ready(prepared) => prepared,
+                live::Preparation::Captcha(ev) => {
+                    if captcha_retry {
+                        return Ok(captcha::needs_human(
+                            checkpoint.unwrap(),
+                            "智慧树仍要求验证，请在官方页面完成后继续",
+                        ));
+                    }
+                    return Ok(captcha::start(
+                        ev,
+                        Value::Null,
+                        generation,
+                        course,
+                        unit,
+                        host.now()?,
+                    ));
+                }
+            };
             if review {
                 p.position = 0;
                 p.questions.clear();
@@ -318,11 +344,33 @@ impl Zhs {
             let mut cp = prepared.to_checkpoint();
             cp["save_after"] = json!(after);
             cp["execution_id"] = json!(generation);
+            if captcha_retry {
+                cp["captcha_retry"] = json!(true);
+            }
             return Ok(
                 json!({"status":"in_progress","checkpoint":cp,"progress":{"watched_seconds":prepared.position},"wait_ms":(after-now).max(1)*1000}),
             );
         }
-        live::save(host, &self.keys, session, account, course, &prepared, chunk)?;
+        if let live::SaveResult::Captcha(ev) =
+            live::save(host, &self.keys, session, account, course, &prepared, chunk)?
+        {
+            let mut cp = prepared.to_checkpoint();
+            cp["execution_id"] = json!(generation);
+            if captcha_retry {
+                return Ok(captcha::needs_human(
+                    &cp,
+                    "智慧树仍要求验证，请在官方页面完成后继续",
+                ));
+            }
+            return Ok(captcha::start(
+                ev,
+                cp,
+                generation,
+                course,
+                unit,
+                host.now()?,
+            ));
+        }
         prepared.advance(chunk);
         let next = (prepared.boundary() - prepared.position)
             .min(STUDY_CHUNK_SECONDS)
