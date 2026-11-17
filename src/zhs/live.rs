@@ -675,6 +675,7 @@ fn units_from_parsed(videos: &[ParsedVideo]) -> Vec<Unit> {
 
 // --- study ------------------------------------------------------------------------
 
+#[derive(Debug)]
 pub struct Prepared {
     pub record_id: String,
     pub position: i64,
@@ -690,6 +691,16 @@ pub struct Prepared {
     pub questions: Vec<(i64, Value)>,
     /// Earliest non-question overlay (theme/picture/knowledge card). The reference stops there.
     pub blocking_at: Option<i64>,
+}
+
+pub enum Preparation {
+    Ready(Prepared),
+    Captcha(String),
+}
+
+pub enum SaveResult {
+    Saved,
+    Captcha(String),
 }
 
 impl Prepared {
@@ -799,7 +810,7 @@ pub fn prepare(
     entry: &str,
     unit: &Unit,
     earlier_incomplete: bool,
-) -> Result<Prepared, ModuleError> {
+) -> Result<Preparation, ModuleError> {
     let key = protocol_key(host, keys, session, 11)?;
     let origin = "https://studyvideoh5.zhihuishu.com";
     let duration = unit
@@ -916,11 +927,34 @@ pub fn prepare(
         origin,
         Stage::OpenStudy,
     )?;
-    let data = learning_data(&reply, endpoints::STUDY_OPEN_PATH)?;
-    if flag(&data["isSlide"])? || flag(&data["isFace"])? {
+    let requires_captcha = number(&reply["code"]) == Some(-12);
+    let data = if requires_captcha {
+        &reply["data"]
+    } else {
+        learning_data(&reply, endpoints::STUDY_OPEN_PATH)?
+    };
+    if flag(&data["isFace"])? {
         return Err(ModuleError::verification_required(
-            "智慧树要求验证码或身份验证，请先到官方页面处理",
+            "智慧树要求人脸验证，请先到官方页面处理",
         ));
+    }
+    if requires_captcha || flag(&data["isSlide"])? {
+        let position = number(&data["studiedLessonDto"]["learnTimeSec"])
+            .unwrap_or(unit.watched_seconds.unwrap_or(0))
+            .clamp(0, duration);
+        let total = number(&data["studiedLessonDto"]["studyTotalTime"])
+            .unwrap_or(position)
+            .max(0);
+        return Ok(Preparation::Captcha(captcha_ev(
+            course,
+            &unit.chapter_id,
+            &unit.lesson_id,
+            &media_id,
+            small_lesson_id(unit),
+            position,
+            total,
+            0,
+        )));
     }
     let record = &data["studiedLessonDto"];
     let record_id =
@@ -932,7 +966,7 @@ pub fn prepare(
         .filter(|value| *value >= 0)
         .ok_or_else(|| ModuleError::protocol_changed("视频记录缺少 studyTotalTime"))?;
 
-    Ok(Prepared {
+    Ok(Preparation::Ready(Prepared {
         record_id,
         position,
         total,
@@ -945,7 +979,7 @@ pub fn prepare(
         school_id,
         questions,
         blocking_at,
-    })
+    }))
 }
 
 fn study_limit(
@@ -1130,7 +1164,7 @@ pub fn save(
     course: &Course,
     prepared: &Prepared,
     seconds: i64,
-) -> Result<(), ModuleError> {
+) -> Result<SaveResult, ModuleError> {
     if !(1..=300).contains(&seconds) {
         return Err(ModuleError::invalid_params("保存时长超出范围"));
     }
@@ -1180,7 +1214,7 @@ pub fn save(
         Stage::SaveStudy,
     )?;
     match number(&reply["code"]) {
-        Some(0) => Ok(()),
+        Some(0) => Ok(SaveResult::Saved),
         Some(401 | 403 | 5008) => Err(ModuleError::login_expired("智慧树登录已失效，请重新扫码")),
         Some(-9) => Err(ModuleError::new(
             "platform_rejected",
@@ -1190,14 +1224,81 @@ pub fn save(
             "platform_rejected",
             "平台检测到另一个学习页面，请关闭其他播放后重新尝试",
         )),
-        Some(-12) => Err(ModuleError::verification_required(
-            "智慧树要求验证码或身份验证，请先到官方页面处理",
+        Some(-12) if flag(&reply["data"]["isFace"])? => Err(ModuleError::verification_required(
+            "智慧树要求人脸验证，请先到官方页面处理",
         )),
+        Some(-12) => Ok(SaveResult::Captcha(captcha_ev(
+            course,
+            &prepared.chapter_id,
+            &prepared.lesson_id,
+            &prepared.media_id,
+            prepared.small_lesson_id.as_deref(),
+            after,
+            prepared.total + seconds,
+            seconds,
+        ))),
         Some(code) => Err(ModuleError::protocol_changed(format!(
             "保存学习记录返回了未预期的 code {code}"
         ))),
         None => Err(ModuleError::protocol_changed("保存学习记录响应缺少 code")),
     }
+}
+
+/// The learning gateway binds a validation token to this video and playback context.
+#[allow(clippy::too_many_arguments)]
+fn captcha_ev(
+    course: &Course,
+    chapter: &str,
+    lesson: &str,
+    media: &str,
+    small: Option<&str>,
+    position: i64,
+    total: i64,
+    delta: i64,
+) -> String {
+    encode_study_fields(&[
+        course.recruit_id.clone(),
+        chapter.to_owned(),
+        course.id.clone(),
+        lesson.to_owned(),
+        format!(
+            "{}:{:02}:{:02}",
+            position / 3600,
+            position / 60 % 60,
+            position % 60
+        ),
+        total.to_string(),
+        media.to_owned(),
+        small.unwrap_or("0").to_owned(),
+        delta.to_string(),
+    ])
+}
+
+pub fn confirm_captcha(
+    host: &dyn Host,
+    keys: &Keys,
+    session: &str,
+    token: &str,
+    ev: &str,
+) -> Result<(), ModuleError> {
+    let key = protocol_key(host, keys, session, 11)?;
+    let reply = signed_post(
+        host,
+        session,
+        endpoints::LEARNING_BASE,
+        endpoints::STUDY_VALIDATE_SLIDE_PATH,
+        json!({"token":token,"ev":ev,"checkType":1}),
+        &key,
+        "https://studyvideoh5.zhihuishu.com",
+        Stage::OpenStudy,
+    )?;
+    let data = learning_data(&reply, endpoints::STUDY_VALIDATE_SLIDE_PATH)?;
+    if number(&data["status"]) == Some(200) && data["pass"] == true {
+        return Ok(());
+    }
+    Err(ModuleError::verification_required(
+        "智慧树未确认滑块验证通过，请在官方页面完成后继续",
+    ))
 }
 
 /// The client sends one point every two seconds: `(total + tick) / 5 + 2`.
@@ -1355,6 +1456,346 @@ mod tests {
         requests: Mutex<Vec<FetchRequest>>,
         state: Mutex<HashMap<(String, String), Value>>,
     }
+
+    struct CaptchaHost {
+        network: FeatureHost,
+        snapshots: Mutex<std::collections::VecDeque<Value>>,
+        calls: Mutex<Vec<(String, Value)>>,
+        now: std::sync::atomic::AtomicI64,
+        available: bool,
+    }
+    impl CaptchaHost {
+        fn new(replies: Vec<Value>, snapshots: Vec<Value>) -> Self {
+            Self {
+                network: FeatureHost {
+                    replies: Mutex::new(replies.into()),
+                    requests: Mutex::new(vec![]),
+                    state: Mutex::new(HashMap::from([(
+                        ("catalog".into(), "entries".into()),
+                        json!({"1/2":"entry"}),
+                    )])),
+                },
+                snapshots: Mutex::new(snapshots.into()),
+                calls: Mutex::new(vec![]),
+                now: std::sync::atomic::AtomicI64::new(1000),
+                available: true,
+            }
+        }
+    }
+    impl Host for CaptchaHost {
+        fn service(&self, method: &str, params: Value) -> Result<Value, ModuleError> {
+            self.calls.lock().unwrap().push((method.into(), params));
+            match method {
+                "cw.captcha.status" => Ok(json!({"available":self.available})),
+                "cw.browser.open" => Ok(json!({"page":"captcha-page"})),
+                "cw.browser.evaluate" => Ok(self
+                    .snapshots
+                    .lock()
+                    .unwrap()
+                    .pop_front()
+                    .expect("预置页面响应")),
+                "cw.browser.image" => Ok(json!({"image":"c3ludGhldGlj","mime":"image/png"})),
+                "cw.captcha.slide_match" => {
+                    Ok(json!({"target":[122,90,179,138],"target_x":2,"target_y":89}))
+                }
+                "cw.browser.mouse" | "cw.browser.close" => Ok(json!({})),
+                _ => Err(ModuleError::unsupported(method)),
+            }
+        }
+        fn now(&self) -> Result<i64, ModuleError> {
+            Ok(self.now.load(std::sync::atomic::Ordering::SeqCst))
+        }
+        fn fetch(&self, request: &FetchRequest) -> Result<FetchResponse, ModuleError> {
+            self.network.fetch(request)
+        }
+        fn state_get(&self, n: &str, k: &str, s: &str) -> Result<Value, ModuleError> {
+            self.network.state_get(n, k, s)
+        }
+        fn state_set(&self, n: &str, k: &str, v: &Value, s: &str) -> Result<(), ModuleError> {
+            self.network.state_set(n, k, v, s)
+        }
+    }
+
+    fn captcha_course_unit() -> (Course, Unit) {
+        (serde_json::from_value(json!({"id":"1","recruit_id":"2","name":"合成课程","kind":"shared","outline_available":true})).unwrap(),
+         serde_json::from_value(json!({"id":"20","name":"合成视频","chapter_id":"10","chapter_name":"第一章","lesson_id":"20","kind":"video","duration_seconds":600,"watched_seconds":0,"state":"not_started","video_id":"99","selectable":true})).unwrap())
+    }
+    fn captcha_puzzle() -> Value {
+        json!({"state":"puzzle","background_url":"https://synthetic.invalid/bg.png","target_url":"https://synthetic.invalid/piece.png",
+            "width":160,"natural_width":320,"piece_left":5,"slider_x":30,"slider_y":200})
+    }
+    fn learning_policy() -> Value {
+        json!({"code":0,"data":{"recruitId":2,"studyStatus":0,"courseInfo":{"courseId":1,"canJumpChapter":true,"type":0}}})
+    }
+    fn captcha_api() -> super::super::Zhs {
+        let api = super::super::Zhs::new(super::super::Settings {
+            source: super::super::Source::Live,
+        });
+        api.keys.put("s", 11, b"0123456789abcdef".to_vec());
+        api
+    }
+
+    #[test]
+    fn captcha_on_open_matches_scaled_gap_and_requires_gateway_confirmation() {
+        let api = captcha_api();
+        let (course, unit) = captcha_course_unit();
+        let host = CaptchaHost::new(
+            vec![
+                learning_policy(),
+                json!({"code":0,"data":{"questionPoint":[]}}),
+                json!({"code":0,"data":{"isSlide":true}}),
+                json!({"code":0,"data":{"status":200,"pass":true}}),
+                learning_policy(),
+                json!({"code":0,"data":{"questionPoint":[]}}),
+                json!({"code":0,"data":{"studiedLessonDto":{"id":7,"learnTimeSec":0,"studyTotalTime":0}}}),
+            ],
+            vec![
+                captcha_puzzle(),
+                json!({"state":"verified","token":"synthetic-validation-token"}),
+            ],
+        );
+        let options = json!({"execution_id":"job/1"});
+        let mut result = api
+            .live_step(&host, "s", &course, &unit, None, &options)
+            .unwrap();
+        assert_eq!(result["checkpoint"]["phase"], "captcha");
+        for _ in 0..3 {
+            result = api
+                .live_step(
+                    &host,
+                    "s",
+                    &course,
+                    &unit,
+                    Some(&result["checkpoint"]),
+                    &options,
+                )
+                .unwrap();
+        }
+        assert_eq!(result["checkpoint"]["phase"], "captcha_retry");
+        assert!(!result.to_string().contains("synthetic-validation-token"));
+        let calls = host.calls.lock().unwrap();
+        let drag = &calls
+            .iter()
+            .find(|(method, _)| method == "cw.browser.mouse")
+            .unwrap()
+            .1;
+        assert_eq!(
+            drag["action"]["to"]["x"], 85.0,
+            "透明边框和 CSS 缩放后应拖动 55 像素"
+        );
+        assert_eq!(calls.last().unwrap().0, "cw.browser.close");
+        drop(calls);
+        let requests = host.network.requests.lock().unwrap();
+        assert_eq!(
+            requests
+                .iter()
+                .filter(|r| r.url.ends_with("validateSlideToken"))
+                .count(),
+            1
+        );
+        assert!(
+            requests
+                .iter()
+                .all(|r| !r.url.ends_with("saveDatabaseIntervalTimeV2"))
+        );
+        drop(requests);
+        result = api
+            .live_step(
+                &host,
+                "s",
+                &course,
+                &unit,
+                Some(&result["checkpoint"]),
+                &options,
+            )
+            .unwrap();
+        assert_eq!(result["checkpoint"]["save_after"], 1030);
+        assert_eq!(result["checkpoint"]["position"], 0);
+    }
+
+    #[test]
+    fn captcha_on_save_does_not_advance_progress_or_credit_time_spent_verifying() {
+        let api = captcha_api();
+        let (course, unit) = captcha_course_unit();
+        let host = CaptchaHost::new(
+            vec![
+                json!({"code":-12}),
+                json!({"code":0,"data":{"status":200,"pass":true}}),
+                json!({"code":-12}),
+            ],
+            vec![
+                captcha_puzzle(),
+                json!({"state":"verified","token":"synthetic-token"}),
+            ],
+        );
+        let mut cp = prepared_at(0).to_checkpoint();
+        cp["save_after"] = json!(900);
+        cp["execution_id"] = json!("job/1");
+        let options = json!({"execution_id":"job/1"});
+        let mut result = api
+            .live_step(&host, "s", &course, &unit, Some(&cp), &options)
+            .unwrap();
+        assert_eq!(result["checkpoint"]["resume"]["position"], 0);
+        for _ in 0..3 {
+            result = api
+                .live_step(
+                    &host,
+                    "s",
+                    &course,
+                    &unit,
+                    Some(&result["checkpoint"]),
+                    &options,
+                )
+                .unwrap();
+        }
+        host.now.store(1050, std::sync::atomic::Ordering::SeqCst);
+        result = api
+            .live_step(
+                &host,
+                "s",
+                &course,
+                &unit,
+                Some(&result["checkpoint"]),
+                &options,
+            )
+            .unwrap();
+        assert_eq!(result["checkpoint"]["save_after"], 1080);
+        assert_eq!(result["checkpoint"]["position"], 0);
+        host.now.store(1080, std::sync::atomic::Ordering::SeqCst);
+        result = api
+            .live_step(
+                &host,
+                "s",
+                &course,
+                &unit,
+                Some(&result["checkpoint"]),
+                &options,
+            )
+            .unwrap();
+        assert_eq!(result["status"], "needs_human", "同一拒绝最多自动验证一次");
+        assert_eq!(result["checkpoint"]["position"], 0);
+        assert_eq!(
+            host.calls
+                .lock()
+                .unwrap()
+                .iter()
+                .filter(|(method, _)| method == "cw.browser.open")
+                .count(),
+            1
+        );
+    }
+
+    #[test]
+    fn captcha_rejection_unsupported_challenge_and_missing_backend_pause_and_close() {
+        let api = captcha_api();
+        let (course, unit) = captcha_course_unit();
+        for scenario in ["rejected", "unsupported", "unavailable", "timeout"] {
+            let mut host = CaptchaHost::new(
+                vec![json!({"code":0,"data":{"status":200,"pass":false}})],
+                vec![if scenario == "unsupported" {
+                    json!({"state":"unsupported"})
+                } else {
+                    json!({"state":"verified","token":"synthetic-token"})
+                }],
+            );
+            host.available = scenario != "unavailable";
+            let mut result = super::super::captcha::start(
+                "context".into(),
+                Value::Null,
+                "job/1",
+                &course,
+                &unit,
+                1000,
+            );
+            result = api
+                .live_step(
+                    &host,
+                    "s",
+                    &course,
+                    &unit,
+                    Some(&result["checkpoint"]),
+                    &json!({"execution_id":"job/1"}),
+                )
+                .unwrap();
+            if scenario != "unavailable" {
+                if scenario == "timeout" {
+                    host.now.store(1061, std::sync::atomic::Ordering::SeqCst);
+                }
+                result = api
+                    .live_step(
+                        &host,
+                        "s",
+                        &course,
+                        &unit,
+                        Some(&result["checkpoint"]),
+                        &json!({"execution_id":"job/1"}),
+                    )
+                    .unwrap();
+                assert_eq!(
+                    host.calls.lock().unwrap().last().unwrap().0,
+                    "cw.browser.close"
+                );
+            }
+            assert_eq!(result["status"], "needs_human", "{scenario}");
+            assert!(!result.to_string().contains("synthetic-token"));
+        }
+    }
+
+    #[test]
+    fn face_verification_never_opens_the_automatic_captcha_solver() {
+        let api = captcha_api();
+        let (course, unit) = captcha_course_unit();
+        let host = CaptchaHost::new(
+            vec![
+                learning_policy(),
+                json!({"code":0,"data":{"questionPoint":[]}}),
+                json!({"code":0,"data":{"isFace":true,"isSlide":true}}),
+            ],
+            vec![],
+        );
+        let error = api
+            .live_step(
+                &host,
+                "s",
+                &course,
+                &unit,
+                None,
+                &json!({"execution_id":"job/1"}),
+            )
+            .unwrap_err();
+        assert_eq!(error.code, "platform_verification_required");
+        assert!(host.calls.lock().unwrap().is_empty());
+    }
+
+    #[test]
+    fn explicit_prelearning_captcha_rejection_preserves_the_video_context() {
+        let api = captcha_api();
+        let (course, unit) = captcha_course_unit();
+        let host = CaptchaHost::new(
+            vec![
+                learning_policy(),
+                json!({"code":0,"data":{"questionPoint":[]}}),
+                json!({"code":-12}),
+            ],
+            vec![],
+        );
+        let result = api
+            .live_step(
+                &host,
+                "s",
+                &course,
+                &unit,
+                None,
+                &json!({"execution_id":"job/1"}),
+            )
+            .unwrap();
+        assert_eq!(result["checkpoint"]["phase"], "captcha");
+        assert_eq!(
+            result["checkpoint"]["ev"],
+            captcha_ev(&course, "10", "20", "99", None, 0, 0, 0)
+        );
+        assert!(host.calls.lock().unwrap().is_empty());
+    }
     impl Host for FeatureHost {
         fn now(&self) -> Result<i64, ModuleError> {
             Ok(1000)
@@ -1407,7 +1848,11 @@ mod tests {
             keys.put("s", 11, KEY.to_vec());
             let course: Course = serde_json::from_value(json!({"id":"1","recruit_id":"2","name":"合成课程","kind":"shared","outline_available":true})).unwrap();
             let unit: Unit = serde_json::from_value(json!({"id":if small{"30"}else{"20"},"name":"合成视频","chapter_id":"10","chapter_name":"第一章","lesson_id":"20","kind":"video","duration_seconds":60,"watched_seconds":0,"state":"not_started","video_id":"99","selectable":true})).unwrap();
-            let prepared = prepare(&host, &keys, "s", "", &course, "entry", &unit, false).unwrap();
+            let Preparation::Ready(prepared) =
+                prepare(&host, &keys, "s", "", &course, "entry", &unit, false).unwrap()
+            else {
+                panic!("不应要求验证码")
+            };
             assert_eq!(
                 prepared.small_lesson_id.as_deref(),
                 if small { Some("30") } else { None }
@@ -1606,19 +2051,40 @@ mod tests {
                 json!({"status":200,"rt":{"examBase":{"questionCount":3,"workExamParts":[{"questionDtos":rows}]}}}),
                 json!({"status":200,"rt":0}),
             ])),
-            requests: Mutex::new(vec![]), state: Mutex::new(HashMap::new()),
+            requests: Mutex::new(vec![]),
+            state: Mutex::new(HashMap::new()),
         };
-        let keys = Keys::default(); keys.put("s", 3, b"0123456789abcdef".to_vec());
-        let client = FeatureClient { host: &host, keys: &keys, session: "s", request: "synthetic/0" };
+        let keys = Keys::default();
+        keys.put("s", 3, b"0123456789abcdef".to_vec());
+        let client = FeatureClient {
+            host: &host,
+            keys: &keys,
+            session: "s",
+            request: "synthetic/0",
+        };
         let course: types::Course = serde_json::from_value(json!({"id":"1","recruit_id":"2","name":"合成课程","kind":"shared","progress":null,"outline_available":true})).unwrap();
         let paper: types::Paper = serde_json::from_value(json!({"id":"p","name":"合成作业","category":"作业","available":true,"done":false,"reason":"","status_label":"","score":null,"attempts_left":null,"opens_at":null,"ends_at":null,"native":{"_exam_id":"3","_student":"4","_exam":false}})).unwrap();
         let attempt = client.feature_open(&course, &paper).unwrap();
-        assert_eq!(attempt.questions.iter().map(|q|q.kind.as_str()).collect::<Vec<_>>(), vec!["single", "multiple", "single"]);
-        let answers = attempt.questions.iter().map(|q|(q.id.clone(),vec!["a".to_owned()])).collect::<HashMap<_,_>>();
-        let writes = client.feature_writes(&course, &attempt, &answers, false).unwrap();
+        assert_eq!(
+            attempt
+                .questions
+                .iter()
+                .map(|q| q.kind.as_str())
+                .collect::<Vec<_>>(),
+            vec!["single", "multiple", "single"]
+        );
+        let answers = attempt
+            .questions
+            .iter()
+            .map(|q| (q.id.clone(), vec!["a".to_owned()]))
+            .collect::<HashMap<_, _>>();
+        let writes = client
+            .feature_writes(&course, &attempt, &answers, false)
+            .unwrap();
         assert_eq!(writes.len(), 3);
         for (request, expected) in writes.iter().zip([14, 2, 1]) {
-            let items: serde_json::Value = serde_json::from_str(request.payload["stuExamAnswer"].as_str().unwrap()).unwrap();
+            let items: serde_json::Value =
+                serde_json::from_str(request.payload["stuExamAnswer"].as_str().unwrap()).unwrap();
             assert_eq!(items[0]["questionType"], expected);
             assert_eq!(request.stage, "draft");
         }

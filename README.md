@@ -1,6 +1,6 @@
 # Courseflow 智慧树模块
 
-`courseflow-zhs` 是智慧树平台的独立 Rust 模块，通过 stdin／stdout 的 NDJSON JSON-RPC 接入 [Courseflow 框架](https://github.com/Course-Flow-Lab/courseflow-framework)。模块 API 为 1，当前模块版本为 0.3.7，需要框架 `>=0.1.6 <0.2.0`。
+`courseflow-zhs` 是智慧树平台的独立 Rust 模块，通过 stdin／stdout 的 NDJSON JSON-RPC 接入 [Courseflow 框架](https://github.com/Course-Flow-Lab/courseflow-framework)。模块 API 为 1，当前模块版本为 0.3.8，需要框架 `>=0.1.13 <0.2.0`。
 
 平台协议和官方页面脚本在本仓库；HTTP 凭据、Cookie 容器、持久化加密、模型密钥、浏览器进程和任务调度由框架管理。模块独立运行，不导入或启动其他平台工程。
 
@@ -12,8 +12,8 @@
 | --- | --- |
 | 模块 id／平台 id | `zhs` |
 | 名称 | 智慧树 |
-| 版本／`moduleApi` | 0.3.7／1 |
-| 框架范围 | `engines.framework`: `>=0.1.6 <0.2.0` |
+| 版本／`moduleApi` | 0.3.8／1 |
+| 框架范围 | `engines.framework`: `>=0.1.13 <0.2.0` |
 | 运行形态 | `runtime.engine`: `binary`，入口 `target/release/courseflow-zhs` |
 | 登录方式 | `qr`（扫码） |
 | 声明操作 | `study`、`answer`、`review`、`meeting`、`mastery`、`qa`、`ask`、`trial` |
@@ -22,8 +22,8 @@
 | 登录保活 | `keepalive_seconds`: 300，框架定期调用 `auth.keepalive` |
 | 配置项 | `source`：`live`（默认，真实平台）或 `fixture`（离线记录） |
 | 网络许可 | `zhihuishu.com`、`*.zhihuishu.com` |
-| 其他权限 | `browser: true`（官方页面与播放器）、`ai: true`（模型生成由宿主执行） |
-| 使用的宿主服务 | `cw.net.fetch`、`cw.state`、`cw.session.identity`、`cw.ai.generate`、`cw.browser.*`、`cw.peers.*`、`cw.clock.now`、`cw.log` |
+| 其他权限 | `browser: true`（官方页面与播放器）、`ai: true`（模型生成由宿主执行）、`captcha: true`（共享本地识别） |
+| 使用的宿主服务 | `cw.net.fetch`、`cw.state`、`cw.session.identity`、`cw.ai.generate`、`cw.captcha.*`、`cw.browser.*`、`cw.peers.*`、`cw.clock.now`、`cw.log` |
 | 清单文件 | [`courseflow.module.json`](courseflow.module.json) |
 
 ## 功能
@@ -55,7 +55,15 @@
 
 0.3.7 兼容作业接口以 `questionType: {id, name}` 对象返回题型，继续兼容数字及数字字符串；保存答案时发送数字题型编号。未知编号仍需人工处理，不按显示名称猜测题型。此前被标为不支持的题目需要在更新模块后创建新任务重新读取。
 
-本版经用户授权在 localhost 使用实际账号验证了一份五题共享课作业：题型识别、模型作答、平台草稿保存和已有答案回读均通过；任务停在交卷确认，未交卷。自动测试仍只使用合成数据，实际账号资料与原始响应保存在源码之外。
+0.3.7 经用户授权在 localhost 使用实际账号验证了一份五题共享课作业：题型识别、模型作答、平台草稿保存和已有答案回读均通过；任务停在交卷确认，未交卷。自动测试仍只使用合成数据，实际账号资料与原始响应保存在源码之外。
+
+## 本地拼图验证
+
+0.3.8 接入 Framework 0.1.13 的共享 ddddocr 服务，覆盖共享课开始学习和保存进度时触发的拼图，也用于短时试跑和每日复习。先按[框架部署说明](https://github.com/Course-Flow-Lab/courseflow-framework/blob/feat/ddddocr-captcha/docs/CAPTCHA.md)启动本地后端，并在框架服务设置 `CF_CAPTCHA_URL`。模块本身不安装 Python 依赖。
+
+验证分步骤执行，总计最多等待 60 秒；同一次明确拒绝只自动处理一次。只有官方组件返回令牌且智慧树 `validateSlideToken` 确认通过才继续，验证期间不累计学习时长。失败时关闭页面、保留检查点并暂停，令牌和图片不进入检查点。人脸、短信、图形点选、登录和作业考试的额外验证仍需人工完成。
+
+本次验证使用合成图片、模拟宿主和离线 Chromium 响应，没有使用真实账号测试验证码通过率。
 
 ## 构建与安装
 
@@ -117,7 +125,7 @@ fixture 的二维码和成绩为样例。真实账号部署必须明确使用 `l
 - 交卷前宿主保存操作锁。响应未知时只回读原作答，不重复交卷。
 - 问答发布前保存意图；没有确认平台记录编号时停止，不自动重发。
 - 见面课使用官方页面和播放器，保留其旧版 `Map` 行为；加载观看历史后寻找缺失分钟，不伪造签到。框架 0.1.2 保留父域登录 Cookie 的作用范围，模块给正常登录跳转保留最多三十秒；持续跳转或平台明确鉴权失败时暂停任务，重新连接后可核对并继续。初始化不依赖官方播放后会复位的 `videoFlag/watchHistoryFlag`，兼容旧版与原生 `Map` 的时间轴；初始化超过六十秒和播放连续三分钟无进展分别提示并保留重试检查点。诊断可在框架任务详情导出日志。
-- 验证码、人脸、额外考试验证、未开放活动、无回放和未知控件保留人工处理状态。
+- 共享课学习拼图由宿主本地识别并通过官方组件验证，智慧树确认后恢复计时。人脸、图形点选、额外考试验证、未开放活动、无回放和未知控件保留人工处理状态。
 
 模块是可信二进制，协议约束不能替代操作系统沙箱。框架的网络白名单约束宿主 HTTP 请求及浏览器入口，Chromium 仍自行加载官方页面内部资源。
 

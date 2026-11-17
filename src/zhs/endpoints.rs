@@ -26,6 +26,7 @@ pub const OUTLINE_PROGRESS_PATH: &str = "/gateway/t/v1/learning/queryStuyInfo";
 pub const STUDY_QUERY_COURSE_PATH: &str = "/gateway/t/v1/learning/queryCourse";
 pub const STUDY_OPEN_PATH: &str = "/gateway/t/v1/learning/prelearningNote";
 pub const STUDY_SAVE_PATH: &str = "/gateway/t/v1/learning/saveDatabaseIntervalTimeV2";
+pub const STUDY_VALIDATE_SLIDE_PATH: &str = "/gateway/t/v1/learning/validateSlideToken";
 pub const STUDY_LIMIT_PATH: &str = "/gateway/t/v1/course/queryStudiedTimeLimitInfo";
 pub const STUDY_POPUP_PATH: &str = "/gateway/t/v1/popupAnswer/loadVideoPointerInfo";
 pub const POPUP_EXAM_PATH: &str = "/gateway/t/v1/popupAnswer/lessonPopupExam";

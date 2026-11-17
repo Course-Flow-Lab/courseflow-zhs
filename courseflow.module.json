@@ -2,10 +2,10 @@
   "schemaVersion": 1,
   "id": "zhs",
   "name": "智慧树",
-  "version": "0.3.7",
+  "version": "0.3.8",
   "moduleApi": 1,
   "engines": {
-    "framework": ">=0.1.6 <0.2.0"
+    "framework": ">=0.1.13 <0.2.0"
   },
   "runtime": {
     "engine": "binary",
@@ -121,6 +121,7 @@
     "browser": true,
     "ai": true,
     "storage": "module",
-    "question_bank": true
+    "question_bank": true,
+    "captcha": true
   }
 }
