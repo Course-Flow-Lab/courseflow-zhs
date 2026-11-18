@@ -3,7 +3,8 @@
   if (!state.started) {
     state.started = true;
     const popup = () => {
-      if (state.ready && state.instance && !state.popped) {
+      // Popup mode emits onReady only after popUp() loads the challenge.
+      if (state.instance && !state.popped) {
         state.popped = true;
         state.instance.popUp();
       }
