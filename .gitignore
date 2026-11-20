@@ -1,1 +1,4 @@
 /target
+
+# Local captcha probe dependencies
+tools/captcha-probe/node_modules
