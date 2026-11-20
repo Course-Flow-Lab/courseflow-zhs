@@ -1580,8 +1580,8 @@ mod tests {
             .unwrap()
             .1;
         assert_eq!(
-            drag["action"]["to"]["x"], 85.0,
-            "透明边框和 CSS 缩放后应拖动 55 像素"
+            drag["action"]["to"]["x"], 95.5,
+            "透明边框和 CSS 缩放后应拖动 55 像素，并补偿 10.5 像素的滑块启动阈值"
         );
         assert_eq!(calls.last().unwrap().0, "cw.browser.close");
         drop(calls);
