@@ -219,11 +219,12 @@ fn drag(snapshot: &Value, matched: &Value) -> Result<(f64, f64, f64), ModuleErro
 #[cfg(test)]
 mod tests {
     #[test]
-    fn page_script_uses_the_study_jigsaw_id() {
-        // The study page's ableCaptchaCommon wrapper uses capType
-        // 'ImageFocusCombine', which selects the jigsaw component.
+    fn page_script_uses_the_official_study_wrapper() {
+        // The study page calls ableCaptchaCommon with capType
+        // 'ImageFocusCombine', which selects the jigsaw branch.
         // 4da305... is the 'space' fallback and presents a click challenge.
-        assert!(super::PAGE_SCRIPT.contains("75f9f716460a422f89a628f50fd8cc2b"));
+        assert!(super::PAGE_SCRIPT.contains("initAbleYidunFallback"));
+        assert!(super::PAGE_SCRIPT.contains("ImageFocusCombine"));
         assert!(!super::PAGE_SCRIPT.contains("4da3050565514a35a50541b0e1f54538"));
     }
 }
