@@ -939,21 +939,12 @@ pub fn prepare(
         ));
     }
     if requires_captcha || flag(&data["isSlide"])? {
-        let position = number(&data["studiedLessonDto"]["learnTimeSec"])
-            .unwrap_or(unit.watched_seconds.unwrap_or(0))
-            .clamp(0, duration);
-        let total = number(&data["studiedLessonDto"]["studyTotalTime"])
-            .unwrap_or(position)
-            .max(0);
         return Ok(Preparation::Captcha(captcha_ev(
             course,
             &unit.chapter_id,
             &unit.lesson_id,
             &media_id,
             small_lesson_id(unit),
-            position,
-            total,
-            0,
         )));
     }
     let record = &data["studiedLessonDto"];
@@ -1233,9 +1224,6 @@ pub fn save(
             &prepared.lesson_id,
             &prepared.media_id,
             prepared.small_lesson_id.as_deref(),
-            after,
-            prepared.total + seconds,
-            seconds,
         ))),
         Some(code) => Err(ModuleError::protocol_changed(format!(
             "保存学习记录返回了未预期的 code {code}"
@@ -1244,33 +1232,22 @@ pub fn save(
     }
 }
 
-/// The learning gateway binds a validation token to this video and playback context.
-#[allow(clippy::too_many_arguments)]
+/// The learning gateway binds a validation token to these five video context fields.
+/// Keep the order and values identical to the official `evLog` built after
+/// `prelearningNoteApi`: recruit, lesson, small lesson, video, chapter.
 fn captcha_ev(
     course: &Course,
     chapter: &str,
     lesson: &str,
     media: &str,
     small: Option<&str>,
-    position: i64,
-    total: i64,
-    delta: i64,
 ) -> String {
     encode_study_fields(&[
         course.recruit_id.clone(),
-        chapter.to_owned(),
-        course.id.clone(),
         lesson.to_owned(),
-        format!(
-            "{}:{:02}:{:02}",
-            position / 3600,
-            position / 60 % 60,
-            position % 60
-        ),
-        total.to_string(),
-        media.to_owned(),
         small.unwrap_or("0").to_owned(),
-        delta.to_string(),
+        media.to_owned(),
+        chapter.to_owned(),
     ])
 }
 
@@ -1523,6 +1500,21 @@ mod tests {
     fn captcha_puzzle() -> Value {
         json!({"state":"puzzle","background_url":"https://synthetic.invalid/bg.png","target_url":"https://synthetic.invalid/piece.png",
             "width":160,"natural_width":320,"piece_left":5,"slider_x":30,"slider_y":200})
+    }
+
+    #[test]
+    fn captcha_ev_uses_the_official_video_context_fields() {
+        let (course, unit) = captcha_course_unit();
+        assert_eq!(
+            captcha_ev(&course, &unit.chapter_id, &unit.lesson_id, "99", Some("77")),
+            encode_study_fields(&[
+                "2".to_owned(),
+                "20".to_owned(),
+                "77".to_owned(),
+                "99".to_owned(),
+                "10".to_owned(),
+            ])
+        );
     }
     fn learning_policy() -> Value {
         json!({"code":0,"data":{"recruitId":2,"studyStatus":0,"courseInfo":{"courseId":1,"canJumpChapter":true,"type":0}}})
@@ -1792,7 +1784,7 @@ mod tests {
         assert_eq!(result["checkpoint"]["phase"], "captcha");
         assert_eq!(
             result["checkpoint"]["ev"],
-            captcha_ev(&course, "10", "20", "99", None, 0, 0, 0)
+            captcha_ev(&course, "10", "20", "99", None)
         );
         assert!(host.calls.lock().unwrap().is_empty());
     }
