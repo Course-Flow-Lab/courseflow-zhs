@@ -1468,6 +1468,7 @@ mod tests {
         calls: Mutex<Vec<(String, Value)>>,
         now: std::sync::atomic::AtomicI64,
         available: bool,
+        manual: bool,
     }
     impl CaptchaHost {
         fn new(replies: Vec<Value>, snapshots: Vec<Value>) -> Self {
@@ -1484,7 +1485,12 @@ mod tests {
                 calls: Mutex::new(vec![]),
                 now: std::sync::atomic::AtomicI64::new(1000),
                 available: true,
+                manual: false,
             }
+        }
+        fn manual(mut self) -> Self {
+            self.manual = true;
+            self
         }
     }
     impl Host for CaptchaHost {
@@ -1492,7 +1498,7 @@ mod tests {
             self.calls.lock().unwrap().push((method.into(), params));
             match method {
                 "cw.captcha.status" => Ok(json!({"available":self.available})),
-                "cw.browser.open" => Ok(json!({"page":"captcha-page"})),
+                "cw.browser.open" => Ok(json!({"page":"captcha-page","manual":self.manual})),
                 "cw.browser.evaluate" => Ok(self
                     .snapshots
                     .lock()
@@ -1787,6 +1793,77 @@ mod tests {
             assert_eq!(result["status"], "needs_human", "{scenario}");
             assert!(!result.to_string().contains("synthetic-token"));
         }
+    }
+
+    #[test]
+    fn manual_captcha_keeps_the_page_open_and_accepts_a_web_token() {
+        let api = captcha_api();
+        let (course, unit) = captcha_course_unit();
+        let host = CaptchaHost::new(
+            vec![json!({"code":0,"data":{"status":200,"pass":true}})],
+            vec![
+                json!({"state":"unsupported"}),
+                json!({"state":"verified","token":"synthetic-manual-token"}),
+            ],
+        )
+        .manual();
+        let mut result = super::super::captcha::start(
+            "context".into(),
+            Value::Null,
+            "job/1",
+            &course,
+            &unit,
+            1000,
+        );
+        result = api
+            .live_step(
+                &host,
+                "s",
+                &course,
+                &unit,
+                Some(&result["checkpoint"]),
+                &json!({"execution_id":"job/1"}),
+            )
+            .unwrap();
+        assert_eq!(result["checkpoint"]["step"], "match");
+        result = api
+            .live_step(
+                &host,
+                "s",
+                &course,
+                &unit,
+                Some(&result["checkpoint"]),
+                &json!({"execution_id":"job/1"}),
+            )
+            .unwrap();
+        assert_eq!(result["status"], "in_progress");
+        assert_eq!(result["checkpoint"]["step"], "manual");
+        assert!(
+            host.calls
+                .lock()
+                .unwrap()
+                .iter()
+                .all(|(method, _)| method != "cw.browser.close"),
+            "进入人工等待时不能关闭验证码页面"
+        );
+        result = api
+            .live_step(
+                &host,
+                "s",
+                &course,
+                &unit,
+                Some(&result["checkpoint"]),
+                &json!({"execution_id":"job/1"}),
+            )
+            .unwrap();
+        assert_eq!(host.calls.lock().unwrap().last().unwrap().0, "cw.browser.close");
+        assert!(
+            result["detail"]
+                .as_str()
+                .unwrap_or("")
+                .contains("已确认验证通过")
+        );
+        assert!(!result.to_string().contains("synthetic-manual-token"));
     }
 
     #[test]

@@ -1,6 +1,6 @@
 # Courseflow 智慧树模块
 
-`courseflow-zhs` 是智慧树平台的独立 Rust 模块，通过 stdin／stdout 的 NDJSON JSON-RPC 接入 [Courseflow 框架](https://github.com/Course-Flow-Lab/courseflow-framework)。模块 API 为 1，当前模块版本为 0.3.15，需要框架 `>=0.1.13 <0.2.0`。
+`courseflow-zhs` 是智慧树平台的独立 Rust 模块，通过 stdin／stdout 的 NDJSON JSON-RPC 接入 [Courseflow 框架](https://github.com/Course-Flow-Lab/courseflow-framework)。模块 API 为 1，当前模块版本为 0.3.16，需要框架 `>=0.1.13 <0.2.0`。
 
 平台协议和官方页面脚本在本仓库；HTTP 凭据、Cookie 容器、持久化加密、模型密钥、浏览器进程和任务调度由框架管理。模块独立运行，不导入或启动其他平台工程。
 
@@ -12,7 +12,7 @@
 | --- | --- |
 | 模块 id／平台 id | `zhs` |
 | 名称 | 智慧树 |
-| 版本／`moduleApi` | 0.3.15／1 |
+| 版本／`moduleApi` | 0.3.16／1 |
 | 框架范围 | `engines.framework`: `>=0.1.13 <0.2.0` |
 | 运行形态 | `runtime.engine`: `binary`，入口 `target/release/courseflow-zhs` |
 | 登录方式 | `qr`（扫码） |
@@ -74,6 +74,8 @@
 0.3.14 已在部署服务器恢复拼图并通过易盾校验，但真实账号的 `validateSlideToken` 仍返回 `status:200, pass:false`。临时调试抓到本次打开 `ev` 为官方五字段 `[recruitId, lessonId, lessonVideoId, videoId, chapterId]` 且值一致，因此下一步应检查令牌来源、`checkType`/签名或平台风险判定，而不是继续改 `ev` 字段。不能把“拼图恢复”当成“平台已通过”。
 
 0.3.15 改用学习页同款官方包装器 `ableCaptchaCommon` + `initAbleYidunFallback`（`capType: "ImageFocusCombine"`），不再直接加载 `cstaticdun/load.min.js` 和原始 `initNECaptcha`。真实账号复测仍能显示拼图并拿到令牌，但 `validateSlideToken` 继续返回 `status:200, pass:false`；说明问题不在原始/包装器令牌来源，下一步应检查平台挑战绑定或风险判定。
+
+0.3.16 增加网页人工完成验证码：自动尝试失败或遇到非拼图挑战后，不再立即关闭页面暂停；若宿主返回 `manual: true`，模块保留官方验证码页面最多 300 秒，任务显示“等待人工完成验证码，请在网页中操作”。WebUI 通过任务接口获取官方弹窗截图并把用户的拖动/点击转发到该页面，成功后模块继续 `validateSlideToken`。超时或宿主不支持时仍按原逻辑暂停。
 
 验证码问题的排查过程、实测数据和后续方案见 [CAPTCHA-POSTMORTEM.md](docs/CAPTCHA-POSTMORTEM.md)。
 

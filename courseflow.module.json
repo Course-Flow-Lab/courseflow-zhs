@@ -2,8 +2,8 @@
   "schemaVersion": 1,
   "id": "zhs",
   "name": "智慧树",
-  "version": "0.3.15",
-  "checkpoint_compatible_from": ["0.3.8", "0.3.9", "0.3.10", "0.3.11", "0.3.12", "0.3.13", "0.3.14"],
+  "version": "0.3.16",
+  "checkpoint_compatible_from": ["0.3.8", "0.3.9", "0.3.10", "0.3.11", "0.3.12", "0.3.13", "0.3.14", "0.3.15"],
   "moduleApi": 1,
   "engines": {
     "framework": ">=0.1.13 <0.2.0"
