@@ -14,8 +14,12 @@
     loader.onerror = () => { state.failed = true; };
     loader.onload = () => {
       try {
+        // The official study page calls ableCaptchaCommon with
+        // capType='ImageFocusCombine'; its wrapper selects this jigsaw
+        // component. 4da305... is the 'space' fallback used for click
+        // challenges, not the component for the shared-course study flow.
         window.initNECaptcha({
-          element: '#courseflow-captcha', captchaId: '4da3050565514a35a50541b0e1f54538',
+          element: '#courseflow-captcha', captchaId: '75f9f716460a422f89a628f50fd8cc2b',
           width: '320px', mode: 'popup', lang: 'zh-CN', protocol: 'https',
           onReady: () => { state.ready = true; popup(); },
           onVerify: (error, data) => {

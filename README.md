@@ -1,6 +1,6 @@
 # Courseflow 智慧树模块
 
-`courseflow-zhs` 是智慧树平台的独立 Rust 模块，通过 stdin／stdout 的 NDJSON JSON-RPC 接入 [Courseflow 框架](https://github.com/Course-Flow-Lab/courseflow-framework)。模块 API 为 1，当前模块版本为 0.3.13，需要框架 `>=0.1.13 <0.2.0`。
+`courseflow-zhs` 是智慧树平台的独立 Rust 模块，通过 stdin／stdout 的 NDJSON JSON-RPC 接入 [Courseflow 框架](https://github.com/Course-Flow-Lab/courseflow-framework)。模块 API 为 1，当前模块版本为 0.3.14，需要框架 `>=0.1.13 <0.2.0`。
 
 平台协议和官方页面脚本在本仓库；HTTP 凭据、Cookie 容器、持久化加密、模型密钥、浏览器进程和任务调度由框架管理。模块独立运行，不导入或启动其他平台工程。
 
@@ -12,7 +12,7 @@
 | --- | --- |
 | 模块 id／平台 id | `zhs` |
 | 名称 | 智慧树 |
-| 版本／`moduleApi` | 0.3.13／1 |
+| 版本／`moduleApi` | 0.3.14／1 |
 | 框架范围 | `engines.framework`: `>=0.1.13 <0.2.0` |
 | 运行形态 | `runtime.engine`: `binary`，入口 `target/release/courseflow-zhs` |
 | 登录方式 | `qr`（扫码） |
@@ -67,9 +67,9 @@
 
 0.3.11 对照智慧树页面确认打开视频时的 `evLog` 只编码 `[recruitId, lessonId, lessonVideoId, videoId, chapterId]` 五个字段；这次只修正了打开阶段。
 
-0.3.12 区分打开和保存两种官方 `ev`：打开使用五字段，保存进度触发验证时使用 `[recruitId, chapterId, courseId, lessonId, position, totalStudyTime, videoId, lessonVideoId, playTimes]` 九字段，并使用官方的零填充 `HH:MM:SS`。此前保存阶段仍把 `validateSlideToken` 的上下文编码错，令牌通过易盾后平台仍返回未通过。
+0.3.12 区分打开和保存两种官方 `ev`：打开使用五字段，保存进度触发验证时使用 `[recruitId, chapterId, courseId, lessonId, position, totalStudyTime, videoId, lessonVideoId, elapsedSeconds]` 九字段；最后一个字段是本次保存秒数，不是播放次数。时间字段的最终格式仍需用官方真实请求复核。此前保存阶段把 `validateSlideToken` 的上下文编码错，令牌通过易盾后平台仍返回未通过。
 
-0.3.13 修正验证码组件编号：官方学习页当前使用 `4da3050565514a35a50541b0e1f54538`，此前脚本使用 `75f9f716460a422f89a628f50fd8cc2b`（其他验证码场景的编号）。易盾虽然能返回令牌，但 `validateSlideToken` 校验的组件不一致，平台仍拒绝。
+0.3.13 曾把学习页组件误判为 `4da3050565514a35a50541b0e1f54538`。0.3.14 更正：学习页的 `ableCaptchaCommon` 以 `capType: "ImageFocusCombine"` 调用，选择 `75f9f716460a422f89a628f50fd8cc2b` 拼图组件；`4da305...` 只是 `space` 回退，会显示图形点选。新的 Playwright 全 no-op 路由探针在官方 HTML 和空文档下都复现了该映射（[工具说明](tools/captcha-probe/README.md)）。
 
 验证码问题的排查过程、实测数据和后续方案见 [CAPTCHA-POSTMORTEM.md](docs/CAPTCHA-POSTMORTEM.md)。
 

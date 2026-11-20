@@ -2,7 +2,7 @@
 
 本文列出智慧树模块的功能范围与验收状态。模块使用 MIT 授权的协议实现，许可证随模块安装；运行时通过宿主服务完成网络、存储与页面操作。
 
-当前框架版本 0.1.13、智慧树模块 0.3.13。下表的“已实现”表示具备真实平台代码路径和工作台入口；“离线验证”表示模拟宿主、fixture 或本地模拟模型通过检查。**本次没有使用真实账号完成学习、交卷、签到或发布验收。**
+当前框架版本 0.1.13、智慧树模块 0.3.14。下表的“已实现”表示具备真实平台代码路径和工作台入口；“离线验证”表示模拟宿主、fixture 或本地模拟模型通过检查。**本次没有使用真实账号完成学习、交卷、签到或发布验收。**
 
 | 功能 | 迁移行为 | 实现与验证 |
 | --- | --- | --- |
@@ -65,6 +65,6 @@ Rust 为 24 项单元测试和 18 项契约测试，框架为 49 项测试，包
 
 0.3.11 对照官方学习页脚本确认打开视频的 `evLog` 为 `[recruitId, lessonId, lessonVideoId, videoId, chapterId]` 五字段。
 
-0.3.12 区分打开和保存的 `ev`：保存阶段的官方 `evLog` 为 `[recruitId, chapterId, courseId, lessonId, position, totalStudyTime, videoId, lessonVideoId, playTimes]`，并使用零填充时间格式；修正后保存触发的 `validateSlideToken` 使用官方上下文。
+0.3.12 区分打开和保存的 `ev`：保存阶段的官方 `evLog` 为 `[recruitId, chapterId, courseId, lessonId, position, totalStudyTime, videoId, lessonVideoId, elapsedSeconds]`；最后一个字段是本次保存秒数，不是播放次数。时间字段的最终格式仍需用官方真实请求复核。修正后保存触发的 `validateSlideToken` 使用官方上下文。
 
-0.3.13 学习页官方验证码组件编号为 `4da3050565514a35a50541b0e1f54538`；脚本改用该编号，避免易盾令牌与 `validateSlideToken` 场景不一致。
+0.3.13 曾把学习页官方组件误判为 `4da3050565514a35a50541b0e1f54538`。0.3.14 依据官方 `ableCaptchaCommon` 的 `capType: "ImageFocusCombine"` 分支更正为 `75f9f716460a422f89a628f50fd8cc2b` 拼图组件；`4da305...` 是 `space` 回退，会显示图形点选。Playwright 全 no-op 路由探针在官方 HTML 与空文档下均复现：`ImageFocusCombine` 请求 75f9 并显示 `yidun--jigsaw`，`space` 请求 4da305 并显示 `yidun--space`。真实账号的 `validateSlideToken` 通过率仍需继续验收。
