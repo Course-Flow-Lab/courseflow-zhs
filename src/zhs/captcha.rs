@@ -92,6 +92,16 @@ fn reopen_manual(
     cp["manual_supported"] = json!(opened["manual"] == true);
     cp["step"] = json!("manual");
     cp["manual_started_at"] = json!(host.now()?);
+    // The fresh page is still an empty document; load the official widget
+    // before the web UI captures it. The manual poll only reads the token.
+    let page = cp["page"]
+        .as_str()
+        .ok_or_else(|| ModuleError::protocol_changed("人工验证页面缺少页面编号"))?
+        .to_owned();
+    host.service(
+        "cw.browser.evaluate",
+        json!({"session":session,"page":page,"expression":PAGE_SCRIPT,"stage":"open_study"}),
+    )?;
     Ok(manual_progress(cp.clone()))
 }
 
