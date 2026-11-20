@@ -380,7 +380,9 @@ fn captcha_ev_save(..., position, total, played) -> String {
 - 任务响应增加 `manual_captcha`；
 - `GET /api/tasks/:id/captcha` 返回官方弹窗 PNG、页面坐标和尺寸；
 - `POST /api/tasks/:id/captcha` 转发 `click`/`drag`，仅任务所有者可调用并需要 CSRF；
-- WebUI 在任务卡片/详情显示“完成验证码”，弹窗中直接操作官方截图；
+- WebUI 在任务卡片/详情显示“完成验证码”，弹窗中用 canvas 显示官方画面；
+- 拖动时发送 `press`/`move`/`release`，并以约 120ms 刷新截图，拼图块会跟随指针实时移动；
+- 站点管理提供无账号的“验证码拖动测试”入口，便于直接验证拖动链路；
 - 用户操作后，模块读取官方 `validate` 令牌并继续 `validateSlideToken`。
 
 这不是绕过平台校验：即使人工操作，平台仍必须确认通过。它把“必须到官方页面”改成“在 Courseflow 页面完成同一验证码”。
