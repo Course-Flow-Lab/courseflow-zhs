@@ -1,6 +1,6 @@
 # Courseflow 智慧树模块
 
-`courseflow-zhs` 是智慧树平台的独立 Rust 模块，通过 stdin／stdout 的 NDJSON JSON-RPC 接入 [Courseflow 框架](https://github.com/Course-Flow-Lab/courseflow-framework)。模块 API 为 1，当前模块版本为 0.3.11，需要框架 `>=0.1.13 <0.2.0`。
+`courseflow-zhs` 是智慧树平台的独立 Rust 模块，通过 stdin／stdout 的 NDJSON JSON-RPC 接入 [Courseflow 框架](https://github.com/Course-Flow-Lab/courseflow-framework)。模块 API 为 1，当前模块版本为 0.3.12，需要框架 `>=0.1.13 <0.2.0`。
 
 平台协议和官方页面脚本在本仓库；HTTP 凭据、Cookie 容器、持久化加密、模型密钥、浏览器进程和任务调度由框架管理。模块独立运行，不导入或启动其他平台工程。
 
@@ -12,7 +12,7 @@
 | --- | --- |
 | 模块 id／平台 id | `zhs` |
 | 名称 | 智慧树 |
-| 版本／`moduleApi` | 0.3.11／1 |
+| 版本／`moduleApi` | 0.3.12／1 |
 | 框架范围 | `engines.framework`: `>=0.1.13 <0.2.0` |
 | 运行形态 | `runtime.engine`: `binary`，入口 `target/release/courseflow-zhs` |
 | 登录方式 | `qr`（扫码） |
@@ -65,7 +65,9 @@
 
 0.3.10 修正自动拼图拖动距离偏短的问题：易盾滑块会先消耗约 10 像素的指针位移才移动拼图。模块现在补偿该启动阈值，使拼图落在识别出的缺口位置后再提交官方校验。此前拖动距离恰好等于缺口距离，拼图总是短约 10 像素并返回 300(unpass)，被误报为“官方验证码组件未通过验证”。
 
-0.3.11 修正官方滑块确认使用的 `ev` 字段：对照智慧树页面 `prelearningNoteApi` 后的 `evLog`，确认它只编码 `[recruitId, lessonId, lessonVideoId, videoId, chapterId]` 五个字段；此前使用了缺口位置、总时长等九个字段，导致易盾令牌虽已通过、`validateSlideToken` 仍拒绝。现在确认请求与官方页面一致。
+0.3.11 对照智慧树页面确认打开视频时的 `evLog` 只编码 `[recruitId, lessonId, lessonVideoId, videoId, chapterId]` 五个字段；这次只修正了打开阶段。
+
+0.3.12 区分打开和保存两种官方 `ev`：打开使用五字段，保存进度触发验证时使用 `[recruitId, chapterId, courseId, lessonId, position, totalStudyTime, videoId, lessonVideoId, playTimes]` 九字段，并使用官方的零填充 `HH:MM:SS`。此前保存阶段仍把 `validateSlideToken` 的上下文编码错，令牌通过易盾后平台仍返回未通过。
 
 验证分步骤执行，总计最多等待 60 秒；同一次明确拒绝只自动处理一次。只有官方组件返回令牌且智慧树 `validateSlideToken` 确认通过才继续，验证期间不累计学习时长。失败时关闭页面、保留检查点并暂停，令牌和图片不进入检查点。人脸、短信、图形点选、登录和作业考试的额外验证仍需人工完成。
 
