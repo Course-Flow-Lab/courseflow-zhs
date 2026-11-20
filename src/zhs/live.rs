@@ -939,7 +939,7 @@ pub fn prepare(
         ));
     }
     if requires_captcha || flag(&data["isSlide"])? {
-        return Ok(Preparation::Captcha(captcha_ev(
+        return Ok(Preparation::Captcha(captcha_ev_open(
             course,
             &unit.chapter_id,
             &unit.lesson_id,
@@ -1218,12 +1218,15 @@ pub fn save(
         Some(-12) if flag(&reply["data"]["isFace"])? => Err(ModuleError::verification_required(
             "智慧树要求人脸验证，请先到官方页面处理",
         )),
-        Some(-12) => Ok(SaveResult::Captcha(captcha_ev(
+        Some(-12) => Ok(SaveResult::Captcha(captcha_ev_save(
             course,
             &prepared.chapter_id,
             &prepared.lesson_id,
             &prepared.media_id,
             prepared.small_lesson_id.as_deref(),
+            after,
+            prepared.total + seconds,
+            seconds,
         ))),
         Some(code) => Err(ModuleError::protocol_changed(format!(
             "保存学习记录返回了未预期的 code {code}"
@@ -1232,10 +1235,9 @@ pub fn save(
     }
 }
 
-/// The learning gateway binds a validation token to these five video context fields.
-/// Keep the order and values identical to the official `evLog` built after
-/// `prelearningNoteApi`: recruit, lesson, small lesson, video, chapter.
-fn captcha_ev(
+/// The official `prelearningNoteApi` evLog: recruit, lesson, small lesson,
+/// video and chapter. Used when opening a video itself requires a challenge.
+fn captcha_ev_open(
     course: &Course,
     chapter: &str,
     lesson: &str,
@@ -1248,6 +1250,32 @@ fn captcha_ev(
         small.unwrap_or("0").to_owned(),
         media.to_owned(),
         chapter.to_owned(),
+    ])
+}
+
+/// The official save evLog: recruit, chapter, course, lesson, position, total,
+/// video, small lesson and play time. Used when saving progress triggers a
+/// challenge; the platform compares it with the token's video context.
+fn captcha_ev_save(
+    course: &Course,
+    chapter: &str,
+    lesson: &str,
+    media: &str,
+    small: Option<&str>,
+    position: i64,
+    total: i64,
+    played: i64,
+) -> String {
+    encode_study_fields(&[
+        course.recruit_id.clone(),
+        chapter.to_owned(),
+        course.id.clone(),
+        lesson.to_owned(),
+        position_text(position),
+        total.to_string(),
+        media.to_owned(),
+        small.unwrap_or("0").to_owned(),
+        played.to_string(),
     ])
 }
 
@@ -1503,16 +1531,44 @@ mod tests {
     }
 
     #[test]
-    fn captcha_ev_uses_the_official_video_context_fields() {
+    fn captcha_ev_open_uses_the_official_video_context_fields() {
         let (course, unit) = captcha_course_unit();
         assert_eq!(
-            captcha_ev(&course, &unit.chapter_id, &unit.lesson_id, "99", Some("77")),
+            captcha_ev_open(&course, &unit.chapter_id, &unit.lesson_id, "99", Some("77")),
             encode_study_fields(&[
                 "2".to_owned(),
                 "20".to_owned(),
                 "77".to_owned(),
                 "99".to_owned(),
                 "10".to_owned(),
+            ])
+        );
+    }
+
+    #[test]
+    fn captcha_ev_save_matches_the_official_save_context() {
+        let (course, unit) = captcha_course_unit();
+        assert_eq!(
+            captcha_ev_save(
+                &course,
+                &unit.chapter_id,
+                &unit.lesson_id,
+                "99",
+                None,
+                3661,
+                600,
+                30,
+            ),
+            encode_study_fields(&[
+                "2".to_owned(),
+                "10".to_owned(),
+                "1".to_owned(),
+                "20".to_owned(),
+                "01:01:01".to_owned(),
+                "600".to_owned(),
+                "99".to_owned(),
+                "0".to_owned(),
+                "30".to_owned(),
             ])
         );
     }
@@ -1784,7 +1840,7 @@ mod tests {
         assert_eq!(result["checkpoint"]["phase"], "captcha");
         assert_eq!(
             result["checkpoint"]["ev"],
-            captcha_ev(&course, "10", "20", "99", None)
+            captcha_ev_open(&course, "10", "20", "99", None)
         );
         assert!(host.calls.lock().unwrap().is_empty());
     }
