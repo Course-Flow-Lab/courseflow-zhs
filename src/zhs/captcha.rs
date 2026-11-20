@@ -13,6 +13,10 @@ const PAGE_SCRIPT: &str = include_str!("captcha.js");
 /// 该值在 `captcha.js` 固定的 320px 弹窗上校准；改动弹窗宽度后需要重新验证。
 const SLIDER_DEAD_ZONE: f64 = 10.5;
 
+/// After the automatic attempt, keep the page open for the web UI user.
+const MANUAL_TIMEOUT_SECS: i64 = 300;
+const MANUAL_POLL_SCRIPT: &str = r#"(() => { const s = window.__courseflowCaptcha; if (s?.token) return {state:'verified', token:s.token}; return {state:'manual'}; })()"#;
+
 fn progress(checkpoint: Value) -> Value {
     let position = checkpoint["resume"]["position"]
         .as_i64()
@@ -20,6 +24,12 @@ fn progress(checkpoint: Value) -> Value {
         .or_else(|| checkpoint["watched_seconds"].as_i64())
         .unwrap_or(0);
     json!({"status":"in_progress","detail":"正在完成智慧树滑块验证","wait_ms":500,"checkpoint":checkpoint,"progress":{"watched_seconds":position}})
+}
+
+fn manual_progress(checkpoint: Value) -> Value {
+    let mut value = progress(checkpoint);
+    value["detail"] = json!("等待人工完成验证码，请在网页中操作");
+    value
 }
 
 pub fn start(
@@ -52,6 +62,37 @@ fn resume(checkpoint: &Value) -> Value {
 
 pub fn needs_human(checkpoint: &Value, reason: &str) -> Value {
     json!({"status":"needs_human","reason":reason,"checkpoint":resume(checkpoint)})
+}
+
+fn enter_manual(host: &dyn Host, cp: &mut Value) -> Result<Value, ModuleError> {
+    if cp["step"] != "manual" {
+        cp["step"] = json!("manual");
+        cp["manual_started_at"] = json!(host.now()?);
+    }
+    Ok(manual_progress(cp.clone()))
+}
+
+fn finish(
+    host: &dyn Host,
+    keys: &Keys,
+    session: &str,
+    cp: &mut Value,
+    snapshot: &Value,
+) -> Result<Value, ModuleError> {
+    let token = snapshot["token"]
+        .as_str()
+        .filter(|s| !s.is_empty() && s.len() <= 8192)
+        .ok_or_else(|| ModuleError::verification_required("验证码没有返回有效令牌"))?;
+    let ev = cp["ev"]
+        .as_str()
+        .filter(|s| !s.is_empty())
+        .ok_or_else(|| ModuleError::verification_required("验证码缺少视频上下文"))?;
+    // A recognized gap or widget callback alone never proves platform acceptance.
+    live::confirm_captcha(host, keys, session, token, ev)?;
+    close(host, session, cp);
+    let mut value = progress(resume(cp));
+    value["detail"] = json!("智慧树已确认验证通过，正在恢复学习");
+    Ok(value)
 }
 
 fn close(host: &dyn Host, session: &str, checkpoint: &Value) {
@@ -105,12 +146,13 @@ fn advance(
     session: &str,
     cp: &mut Value,
 ) -> Result<Value, ModuleError> {
-    if host.now()? - cp["started_at"].as_i64().unwrap_or(0) > 60 {
+    let step = cp["step"].as_str().unwrap_or("").to_owned();
+    if step != "manual" && host.now()? - cp["started_at"].as_i64().unwrap_or(0) > 60 {
         return Err(ModuleError::verification_required(
             "验证码已超时，请在官方页面完成后继续",
         ));
     }
-    if cp["step"] == "open" {
+    if step == "open" {
         let available = host.service("cw.captcha.status", json!({"session":session}))?;
         if available["available"] != true {
             return Err(ModuleError::verification_required(
@@ -123,6 +165,7 @@ fn advance(
             .filter(|v| v.as_str().is_some_and(|s| !s.is_empty()))
             .cloned()
             .ok_or_else(|| ModuleError::protocol_changed("验证码浏览器未返回页面编号"))?;
+        cp["manual_supported"] = json!(opened["manual"] == true);
         cp["step"] = json!("match");
         return Ok(progress(cp.clone()));
     }
@@ -130,6 +173,22 @@ fn advance(
         .as_str()
         .ok_or_else(|| ModuleError::verification_required("验证码页面已失效"))?
         .to_owned();
+    if step == "manual" {
+        let started = cp["manual_started_at"].as_i64().unwrap_or(0);
+        if host.now()? - started > MANUAL_TIMEOUT_SECS {
+            return Err(ModuleError::verification_required(
+                "人工验证已超时，请在官方页面完成后继续",
+            ));
+        }
+        let snapshot = host.service(
+            "cw.browser.evaluate",
+            json!({"session":session,"page":page,"expression":MANUAL_POLL_SCRIPT,"stage":"open_study"}),
+        )?;
+        if snapshot["state"] == "verified" {
+            return finish(host, keys, session, cp, &snapshot);
+        }
+        return Ok(manual_progress(cp.clone()));
+    }
     let script = if cp["step"] == "confirm" {
         format!("window.__courseflowCaptchaWaitToken=true;{PAGE_SCRIPT}")
     } else {
@@ -144,22 +203,7 @@ fn advance(
     }
     match snapshot["state"].as_str() {
         Some("loading") => Ok(progress(cp.clone())),
-        Some("verified") => {
-            let token = snapshot["token"]
-                .as_str()
-                .filter(|s| !s.is_empty() && s.len() <= 8192)
-                .ok_or_else(|| ModuleError::verification_required("验证码没有返回有效令牌"))?;
-            let ev = cp["ev"]
-                .as_str()
-                .filter(|s| !s.is_empty())
-                .ok_or_else(|| ModuleError::verification_required("验证码缺少视频上下文"))?;
-            // A recognized gap or widget callback alone never proves platform acceptance.
-            live::confirm_captcha(host, keys, session, token, ev)?;
-            close(host, session, cp);
-            let mut value = progress(resume(cp));
-            value["detail"] = json!("智慧树已确认验证通过，正在恢复学习");
-            Ok(value)
-        }
+        Some("verified") => finish(host, keys, session, cp, &snapshot),
         Some("puzzle") if cp["step"] == "match" => {
             let target = host.service(
                 "cw.browser.image",
@@ -179,12 +223,24 @@ fn advance(
             cp["step"] = json!("confirm");
             Ok(progress(cp.clone()))
         }
-        Some("unsupported") => Err(ModuleError::verification_required(
-            "当前为图形点选或其他验证，请在官方页面完成",
-        )),
-        _ => Err(ModuleError::verification_required(
-            "官方验证码组件未通过验证，请在官方页面完成",
-        )),
+        Some("unsupported") | Some("failed") => {
+            if cp["manual_supported"] == true {
+                enter_manual(host, cp)
+            } else {
+                Err(ModuleError::verification_required(
+                    "当前为图形点选或其他验证，请在官方页面完成",
+                ))
+            }
+        }
+        _ => {
+            if cp["manual_supported"] == true {
+                enter_manual(host, cp)
+            } else {
+                Err(ModuleError::verification_required(
+                    "官方验证码组件未通过验证，请在官方页面完成",
+                ))
+            }
+        }
     }
 }
 
