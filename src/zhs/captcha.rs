@@ -72,6 +72,48 @@ fn enter_manual(host: &dyn Host, cp: &mut Value) -> Result<Value, ModuleError> {
     Ok(manual_progress(cp.clone()))
 }
 
+/// A rejected platform token cannot be reused by the manual UI. Replace the
+/// page with a fresh official challenge and keep the task running for input.
+fn reopen_manual(
+    host: &dyn Host,
+    session: &str,
+    cp: &mut Value,
+) -> Result<Value, ModuleError> {
+    close(host, session, cp);
+    let opened = host.service(
+        "cw.browser.open",
+        json!({"session":session,"url":"https://studyvideoh5.zhihuishu.com/stuStudy","purpose":"captcha","stage":"open_study"}),
+    )?;
+    cp["page"] = opened
+        .get("page")
+        .filter(|v| v.as_str().is_some_and(|s| !s.is_empty()))
+        .cloned()
+        .ok_or_else(|| ModuleError::protocol_changed("人工验证页面未返回页面编号"))?;
+    cp["manual_supported"] = json!(opened["manual"] == true);
+    cp["step"] = json!("manual");
+    cp["manual_started_at"] = json!(host.now()?);
+    Ok(manual_progress(cp.clone()))
+}
+
+fn handle_finish(
+    host: &dyn Host,
+    keys: &Keys,
+    session: &str,
+    cp: &mut Value,
+    snapshot: &Value,
+) -> Result<Value, ModuleError> {
+    match finish(host, keys, session, cp, snapshot) {
+        Ok(value) => Ok(value),
+        Err(error)
+            if cp["manual_supported"] == true
+                && error.code == "platform_verification_required" =>
+        {
+            reopen_manual(host, session, cp)
+        }
+        Err(error) => Err(error),
+    }
+}
+
 fn finish(
     host: &dyn Host,
     keys: &Keys,
@@ -185,7 +227,7 @@ fn advance(
             json!({"session":session,"page":page,"expression":MANUAL_POLL_SCRIPT,"stage":"open_study"}),
         )?;
         if snapshot["state"] == "verified" {
-            return finish(host, keys, session, cp, &snapshot);
+            return handle_finish(host, keys, session, cp, &snapshot);
         }
         return Ok(manual_progress(cp.clone()));
     }
@@ -203,7 +245,7 @@ fn advance(
     }
     match snapshot["state"].as_str() {
         Some("loading") => Ok(progress(cp.clone())),
-        Some("verified") => finish(host, keys, session, cp, &snapshot),
+        Some("verified") => handle_finish(host, keys, session, cp, &snapshot),
         Some("puzzle") if cp["step"] == "match" => {
             let target = host.service(
                 "cw.browser.image",
