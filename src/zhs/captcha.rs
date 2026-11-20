@@ -215,3 +215,11 @@ fn drag(snapshot: &Value, matched: &Value) -> Result<(f64, f64, f64), ModuleErro
         distance,
     ))
 }
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn page_script_uses_the_study_captcha_id() {
+        assert!(super::PAGE_SCRIPT.contains("4da3050565514a35a50541b0e1f54538"));
+    }
+}

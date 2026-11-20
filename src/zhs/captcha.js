@@ -15,7 +15,7 @@
     loader.onload = () => {
       try {
         window.initNECaptcha({
-          element: '#courseflow-captcha', captchaId: '75f9f716460a422f89a628f50fd8cc2b',
+          element: '#courseflow-captcha', captchaId: '4da3050565514a35a50541b0e1f54538',
           width: '320px', mode: 'popup', lang: 'zh-CN', protocol: 'https',
           onReady: () => { state.ready = true; popup(); },
           onVerify: (error, data) => {
