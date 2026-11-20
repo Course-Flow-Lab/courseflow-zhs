@@ -8,6 +8,11 @@ use serde_json::{Value, json};
 
 const PAGE_SCRIPT: &str = include_str!("captcha.js");
 
+/// 易盾滑块在组件开始移动拼图前会先吃掉约 10 CSS 像素的指针位移。平台校验的是
+/// 拼图最终位置，因此只拖动识别出的缺口距离会短 10 像素左右并返回 300(unpass)。
+/// 该值在 `captcha.js` 固定的 320px 弹窗上校准；改动弹窗宽度后需要重新验证。
+const SLIDER_DEAD_ZONE: f64 = 10.5;
+
 fn progress(checkpoint: Value) -> Value {
     let position = checkpoint["resume"]["position"]
         .as_i64()
@@ -193,7 +198,7 @@ fn drag(snapshot: &Value, matched: &Value) -> Result<(f64, f64, f64), ModuleErro
     let width = number(&snapshot["width"])?;
     let natural = number(&snapshot["natural_width"])?;
     let gap = number(&matched["target"][0])? - number(&matched["target_x"])?;
-    let distance = gap * width / natural - number(&snapshot["piece_left"])?;
+    let distance = gap * width / natural - number(&snapshot["piece_left"])? + SLIDER_DEAD_ZONE;
     if width <= 0.0
         || natural <= 0.0
         || !distance.is_finite()

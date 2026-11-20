@@ -1,6 +1,6 @@
 # Courseflow 智慧树模块
 
-`courseflow-zhs` 是智慧树平台的独立 Rust 模块，通过 stdin／stdout 的 NDJSON JSON-RPC 接入 [Courseflow 框架](https://github.com/Course-Flow-Lab/courseflow-framework)。模块 API 为 1，当前模块版本为 0.3.9，需要框架 `>=0.1.13 <0.2.0`。
+`courseflow-zhs` 是智慧树平台的独立 Rust 模块，通过 stdin／stdout 的 NDJSON JSON-RPC 接入 [Courseflow 框架](https://github.com/Course-Flow-Lab/courseflow-framework)。模块 API 为 1，当前模块版本为 0.3.10，需要框架 `>=0.1.13 <0.2.0`。
 
 平台协议和官方页面脚本在本仓库；HTTP 凭据、Cookie 容器、持久化加密、模型密钥、浏览器进程和任务调度由框架管理。模块独立运行，不导入或启动其他平台工程。
 
@@ -12,7 +12,7 @@
 | --- | --- |
 | 模块 id／平台 id | `zhs` |
 | 名称 | 智慧树 |
-| 版本／`moduleApi` | 0.3.9／1 |
+| 版本／`moduleApi` | 0.3.10／1 |
 | 框架范围 | `engines.framework`: `>=0.1.13 <0.2.0` |
 | 运行形态 | `runtime.engine`: `binary`，入口 `target/release/courseflow-zhs` |
 | 登录方式 | `qr`（扫码） |
@@ -62,6 +62,8 @@
 0.3.8 接入 Framework 0.1.13 的共享 ddddocr 服务，覆盖共享课开始学习和保存进度时触发的拼图，也用于短时试跑和每日复习。先按[框架部署说明](https://github.com/Course-Flow-Lab/courseflow-framework/blob/main/docs/CAPTCHA.md)启动本地后端，并在框架服务设置 `CF_CAPTCHA_URL`。模块本身不安装 Python 依赖。
 
 0.3.9 修复验证码弹窗一直等待并在 60 秒后超时的问题：组件实例创建后立即调用 `popUp()`。弹窗模式在显示并加载题目后才触发 `onReady`，不能等待该回调后再显示弹窗。
+
+0.3.10 修正自动拼图拖动距离偏短的问题：易盾滑块会先消耗约 10 像素的指针位移才移动拼图。模块现在补偿该启动阈值，使拼图落在识别出的缺口位置后再提交官方校验。此前拖动距离恰好等于缺口距离，拼图总是短约 10 像素并返回 300(unpass)，被误报为“官方验证码组件未通过验证”。
 
 验证分步骤执行，总计最多等待 60 秒；同一次明确拒绝只自动处理一次。只有官方组件返回令牌且智慧树 `validateSlideToken` 确认通过才继续，验证期间不累计学习时长。失败时关闭页面、保留检查点并暂停，令牌和图片不进入检查点。人脸、短信、图形点选、登录和作业考试的额外验证仍需人工完成。
 
