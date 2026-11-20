@@ -71,4 +71,4 @@ Rust 为 24 项单元测试和 18 项契约测试，框架为 49 项测试，包
 
 0.3.14 已部署；真实账号复测确认拼图恢复并拿到易盾令牌，但 `validateSlideToken` 返回 `status:200, pass:false`，任务再次暂停。调试抓到的打开 `ev` 为官方五字段且值一致，下一步应检查令牌来源、`checkType`/签名或平台风险判定，而不是继续更换组件或字段。
 
-0.3.15 改用学习页同款官方包装器 `ableCaptchaCommon` 的 `initAbleYidunFallback`，验证官方包装器生成的令牌是否能通过平台确认；结果尚未作为真实账号通过结论。
+0.3.15 改用学习页同款官方包装器 `ableCaptchaCommon` 的 `initAbleYidunFallback`。真实账号复测仍显示拼图并拿到令牌，但 `validateSlideToken` 继续返回 `status:200, pass:false`；因此原始/包装器令牌来源不是唯一原因，下一步应检查平台挑战绑定或风险判定。
