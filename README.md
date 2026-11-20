@@ -71,6 +71,8 @@
 
 0.3.13 曾把学习页组件误判为 `4da3050565514a35a50541b0e1f54538`。0.3.14 更正：学习页的 `ableCaptchaCommon` 以 `capType: "ImageFocusCombine"` 调用，选择 `75f9f716460a422f89a628f50fd8cc2b` 拼图组件；`4da305...` 只是 `space` 回退，会显示图形点选。新的 Playwright 全 no-op 路由探针在官方 HTML 和空文档下都复现了该映射（[工具说明](tools/captcha-probe/README.md)）。
 
+0.3.14 已在部署服务器恢复拼图并通过易盾校验，但真实账号的 `validateSlideToken` 仍未确认通过；下一步需要抓取官方页面的真实请求对照打开/保存 `ev`，不能把“拼图恢复”当成“平台已通过”。
+
 验证码问题的排查过程、实测数据和后续方案见 [CAPTCHA-POSTMORTEM.md](docs/CAPTCHA-POSTMORTEM.md)。
 
 验证分步骤执行，总计最多等待 60 秒；同一次明确拒绝只自动处理一次。只有官方组件返回令牌且智慧树 `validateSlideToken` 确认通过才继续，验证期间不累计学习时长。失败时关闭页面、保留检查点并暂停，令牌和图片不进入检查点。人脸、短信、图形点选、登录和作业考试的额外验证仍需人工完成。
