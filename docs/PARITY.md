@@ -69,4 +69,4 @@ Rust 为 24 项单元测试和 18 项契约测试，框架为 49 项测试，包
 
 0.3.13 曾把学习页官方组件误判为 `4da3050565514a35a50541b0e1f54538`。0.3.14 依据官方 `ableCaptchaCommon` 的 `capType: "ImageFocusCombine"` 分支更正为 `75f9f716460a422f89a628f50fd8cc2b` 拼图组件；`4da305...` 是 `space` 回退，会显示图形点选。Playwright 全 no-op 路由探针在官方 HTML 与空文档下均复现：`ImageFocusCombine` 请求 75f9 并显示 `yidun--jigsaw`，`space` 请求 4da305 并显示 `yidun--space`。真实账号的 `validateSlideToken` 通过率仍需继续验收。
 
-0.3.14 已部署；真实账号复测确认拼图恢复并拿到易盾令牌，但 `validateSlideToken` 仍未通过，任务再次暂停。当前状态是“组件正确、平台确认未通过”，下一步需抓官方页面请求对照 `ev`，而不是继续更换组件。
+0.3.14 已部署；真实账号复测确认拼图恢复并拿到易盾令牌，但 `validateSlideToken` 返回 `status:200, pass:false`，任务再次暂停。调试抓到的打开 `ev` 为官方五字段且值一致，下一步应检查令牌来源、`checkType`/签名或平台风险判定，而不是继续更换组件或字段。

@@ -71,7 +71,7 @@
 
 0.3.13 曾把学习页组件误判为 `4da3050565514a35a50541b0e1f54538`。0.3.14 更正：学习页的 `ableCaptchaCommon` 以 `capType: "ImageFocusCombine"` 调用，选择 `75f9f716460a422f89a628f50fd8cc2b` 拼图组件；`4da305...` 只是 `space` 回退，会显示图形点选。新的 Playwright 全 no-op 路由探针在官方 HTML 和空文档下都复现了该映射（[工具说明](tools/captcha-probe/README.md)）。
 
-0.3.14 已在部署服务器恢复拼图并通过易盾校验，但真实账号的 `validateSlideToken` 仍未确认通过；下一步需要抓取官方页面的真实请求对照打开/保存 `ev`，不能把“拼图恢复”当成“平台已通过”。
+0.3.14 已在部署服务器恢复拼图并通过易盾校验，但真实账号的 `validateSlideToken` 仍返回 `status:200, pass:false`。临时调试抓到本次打开 `ev` 为官方五字段 `[recruitId, lessonId, lessonVideoId, videoId, chapterId]` 且值一致，因此下一步应检查令牌来源、`checkType`/签名或平台风险判定，而不是继续改 `ev` 字段。不能把“拼图恢复”当成“平台已通过”。
 
 验证码问题的排查过程、实测数据和后续方案见 [CAPTCHA-POSTMORTEM.md](docs/CAPTCHA-POSTMORTEM.md)。
 
