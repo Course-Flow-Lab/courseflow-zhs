@@ -1875,6 +1875,7 @@ mod tests {
             vec![
                 captcha_puzzle(),
                 json!({"state":"verified","token":"synthetic-rejected-token"}),
+                json!({"state":"loading"}),
             ],
         )
         .manual();
