@@ -73,7 +73,7 @@
 
 0.3.14 已在部署服务器恢复拼图并通过易盾校验，但真实账号的 `validateSlideToken` 仍返回 `status:200, pass:false`。临时调试抓到本次打开 `ev` 为官方五字段 `[recruitId, lessonId, lessonVideoId, videoId, chapterId]` 且值一致，因此下一步应检查令牌来源、`checkType`/签名或平台风险判定，而不是继续改 `ev` 字段。不能把“拼图恢复”当成“平台已通过”。
 
-0.3.15 改用学习页同款官方包装器 `ableCaptchaCommon` + `initAbleYidunFallback`（`capType: "ImageFocusCombine"`），不再直接加载 `cstaticdun/load.min.js` 和原始 `initNECaptcha`。这次用于验证令牌来源是否影响平台确认，尚未作为真实账号通过结论。
+0.3.15 改用学习页同款官方包装器 `ableCaptchaCommon` + `initAbleYidunFallback`（`capType: "ImageFocusCombine"`），不再直接加载 `cstaticdun/load.min.js` 和原始 `initNECaptcha`。真实账号复测仍能显示拼图并拿到令牌，但 `validateSlideToken` 继续返回 `status:200, pass:false`；说明问题不在原始/包装器令牌来源，下一步应检查平台挑战绑定或风险判定。
 
 验证码问题的排查过程、实测数据和后续方案见 [CAPTCHA-POSTMORTEM.md](docs/CAPTCHA-POSTMORTEM.md)。
 
