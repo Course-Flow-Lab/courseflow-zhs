@@ -3,31 +3,33 @@
   if (!state.started) {
     state.started = true;
     const popup = () => {
-      // Popup mode emits onReady only after popUp() loads the challenge.
+      // The wrapper calls captchaIns with the popup instance; showing it
+      // triggers the challenge load, so do not wait for onReady first.
       if (state.instance && !state.popped) {
         state.popped = true;
         state.instance.popUp();
       }
     };
     const loader = document.createElement('script');
-    loader.src = 'https://cstaticdun.126.net/load.min.js';
+    // Use the same official wrapper as the study page. Its ImageFocusCombine
+    // branch selects the 75f9... jigsaw component; the space branch (4da305...)
+    // is the click fallback and must not be requested for shared-course study.
+    loader.src = 'https://www.zhihuishu.com/assets/ableCaptcha/ableCaptchaCommon.js';
     loader.onerror = () => { state.failed = true; };
     loader.onload = () => {
       try {
-        // The official study page calls ableCaptchaCommon with
-        // capType='ImageFocusCombine'; its wrapper selects this jigsaw
-        // component. 4da305... is the 'space' fallback used for click
-        // challenges, not the component for the shared-course study flow.
-        window.initNECaptcha({
-          element: '#courseflow-captcha', captchaId: '75f9f716460a422f89a628f50fd8cc2b',
-          width: '320px', mode: 'popup', lang: 'zh-CN', protocol: 'https',
-          onReady: () => { state.ready = true; popup(); },
-          onVerify: (error, data) => {
-            if (!error && data?.validate) state.token = data.validate;
+        window.initAbleYidunFallback({
+          eleCapId: '#courseflow-captcha', width: '320px',
+          showPop: true, enableClose: 1, capType: 'ImageFocusCombine',
+          onSuccessAble: (_error, payload) => {
+            const validate = payload?.data?.validate;
+            if (validate) state.token = validate;
             else state.failed = true;
           },
-          onError: () => { state.failed = true; },
-        }, instance => { state.instance = instance; popup(); }, () => { state.failed = true; });
+          onErrorAble: () => { state.failed = true; },
+          onCloseAble: () => {},
+          captchaIns: instance => { state.instance = instance; popup(); },
+        });
       } catch { state.failed = true; }
     };
     document.head.appendChild(loader);
