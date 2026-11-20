@@ -1867,6 +1867,53 @@ mod tests {
     }
 
     #[test]
+    fn rejected_platform_token_reopens_a_fresh_manual_challenge() {
+        let api = captcha_api();
+        let (course, unit) = captcha_course_unit();
+        let host = CaptchaHost::new(
+            vec![json!({"code":0,"data":{"status":200,"pass":false}})],
+            vec![
+                captcha_puzzle(),
+                json!({"state":"verified","token":"synthetic-rejected-token"}),
+            ],
+        )
+        .manual();
+        let mut result = super::super::captcha::start(
+            "context".into(),
+            Value::Null,
+            "job/1",
+            &course,
+            &unit,
+            1000,
+        );
+        for _ in 0..3 {
+            result = api
+                .live_step(
+                    &host,
+                    "s",
+                    &course,
+                    &unit,
+                    Some(&result["checkpoint"]),
+                    &json!({"execution_id":"job/1"}),
+                )
+                .unwrap();
+        }
+        assert_eq!(result["status"], "in_progress");
+        assert_eq!(result["checkpoint"]["step"], "manual");
+        assert_eq!(
+            host.calls
+                .lock()
+                .unwrap()
+                .iter()
+                .filter(|(method, _)| method == "cw.browser.open")
+                .count(),
+            2,
+            "平台拒绝旧令牌后应重新打开一个干净的人工验证页面"
+        );
+        assert!(!result.to_string().contains("synthetic-rejected-token"));
+    }
+
+    #[test]
     fn face_verification_never_opens_the_automatic_captcha_solver() {
         let api = captcha_api();
         let (course, unit) = captcha_course_unit();
